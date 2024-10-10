@@ -1,0 +1,14 @@
+# Exclude Adobe diagnostics folder (causing build errors)
+C:/Users/Admin/AppData/Roaming/com.adobe.dunamis/
+
+# Ignore logs and temporary build files
+*.log
+*.tmp
+
+# Ignore local development tools or editor settings
+.vscode/
+.idea/
+
+# Exclude other cache or temporary directories
+.expo/
+node_modules/
