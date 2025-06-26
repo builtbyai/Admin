@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Spatial Layout Analysis Schema",
+  "type": "object",
+  "required": [
+    "document_metadata",
+    "spatial_layout",
+    "text_elements",
+    "text_flow_summary",
+    "spatial_relationships",
+    "readability_metrics"
+  ],
+  "properties": {
+    "document_metadata": {
+      "type": "object",
+      "required": ["timestamp", "source_type", "dimensions", "language"],
+      "properties": {
+        "timestamp": {"type": "string", "format": "date-time"},
+        "source_type": {"type": "string", "enum": ["document", "screenshot", "image", "pdf", "webpage"]},
+        "dimensions": {
+          "type": "object",
+          "properties": {
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1}
+          }
+        },
+        "language": {"type": "string"},
+        "text_direction": {"type": "string", "enum": ["ltr", "rtl", "ttb"]},
+        "column_count": {"type": "integer", "minimum": 1}
+      }
+    },
+    "spatial_layout": {
+      "type": "object",
+      "properties": {
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {"type": "string"},
+              "bounding_box": {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 4,
+                "maxItems": 4
+              },
+              "z_order": {"type": "integer"}
+            }
+          }
+        }
+      }
+    },
+    "text_elements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text", "bounding_box", "typography", "metrics"],
+        "properties": {
+          "id": {"type": "string"},
+          "text": {"type": "string"},
+          "bounding_box": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "typography": {
+            "type": "object",
+            "properties": {
+              "font_family": {"type": "string"},
+              "font_size": {"type": "integer"},
+              "font_weight": {"type": "string"},
+              "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}
+            }
+          },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "character_count": {"type": "integer"},
+              "word_count": {"type": "integer"},
+              "syllable_count": {"type": "integer"},
+              "reading_time_seconds": {"type": "number"}
+            }
+          }
+        }
+      }
+    },
+    "readability_metrics": {
+      "type": "object",
+      "properties": {
+        "flesch_reading_ease": {"type": "number"},
+        "flesch_kincaid_grade": {"type": "number"},
+        "automated_readability_index": {"type": "number"}
+      }
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "common_layouts": {
+    "single_column": {
+      "characteristics": ["centered content", "consistent margins", "full width text"],
+      "typical_width_ratio": [0.6, 0.8],
+      "margin_ratio": [0.1, 0.2],
+      "indicators": ["single text flow", "no vertical dividers"]
+    },
+    "two_column": {
+      "characteristics": ["vertical divider", "parallel text flow", "balanced content"],
+      "gutter_width": [20, 40],
+      "column_ratio": [0.4, 0.6],
+      "indicators": ["two distinct text regions", "vertical alignment"]
+    },
+    "three_column": {
+      "characteristics": ["newspaper style", "narrow columns", "multiple gutters"],
+      "gutter_width": [15, 30],
+      "column_width": [0.25, 0.35],
+      "indicators": ["three text regions", "consistent column widths"]
+    },
+    "grid": {
+      "characteristics": ["regular spacing", "aligned elements", "modular design"],
+      "cell_padding": [8, 16],
+      "grid_gap": [10, 20],
+      "indicators": ["consistent spacing", "rectangular regions"]
+    },
+    "sidebar": {
+      "characteristics": ["main content area", "secondary navigation", "asymmetric layout"],
+      "sidebar_width": [200, 300],
+      "content_ratio": [0.7, 0.8],
+      "indicators": ["narrow side column", "wide main area"]
+    }
+  },
+  "mobile_patterns": {
+    "status_bar_height": [20, 44],
+    "navigation_bar_height": [48, 56],
+    "tab_bar_height": [49, 83],
+    "safe_area_insets": {
+      "top": [20, 44],
+      "bottom": [0, 34],
+      "left": [0, 44],
+      "right": [0, 44]
+    },
+    "common_breakpoints": {
+      "small": 320,
+      "medium": 375,
+      "large": 414,
+      "extra_large": 768
+    }
+  },
+  "desktop_patterns": {
+    "header_height": [60, 100],
+    "footer_height": [50, 150],
+    "sidebar_width": [200, 350],
+    "content_max_width": [800, 1200],
+    "common_breakpoints": {
+      "tablet": 768,
+      "desktop": 1024,
+      "large_desktop": 1440,
+      "extra_large": 1920
+    }
+  },
+  "document_patterns": {
+    "letter_size": {
+      "width": 612,
+      "height": 792,
+      "margins": [72, 108]
+    },
+    "a4_size": {
+      "width": 595,
+      "height": 842,
+      "margins": [72, 108]
+    },
+    "typical_margins": {
+      "academic": [72, 108],
+      "business": [54, 72],
+      "casual": [36, 54]
+    }
+  }
+}
