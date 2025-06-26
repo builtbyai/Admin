@@ -63,13 +63,13 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Skip dependency installation and try minimal version due to Python environment issues
-echo Python environment appears corrupted, using minimal version...
-python text_organizer_minimal.py
+REM Skip dependency installation and try ultra minimal version due to Python environment issues
+echo Python environment appears corrupted, using ultra minimal version...
+python text_organizer_ultra_minimal.py
 
 if %errorlevel% neq 0 (
     echo.
-    echo Error running the minimal text organizer.
+    echo Error running the ultra minimal text organizer.
     echo Your Python installation may be corrupted.
     echo Consider reinstalling Python from https://python.org
     echo.
