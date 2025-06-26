@@ -16,7 +16,7 @@ echo Checking required packages...
 python -c "import tkinter, PIL, pytesseract, watchdog, pandas, eyed3, mutagen, cv2, numpy" >nul 2>&1
 if errorlevel 1 (
     echo Installing required packages...
-    pip install pillow pytesseract watchdog pandas eyed3 mutagen-python opencv-python numpy
+    pip install pillow pytesseract watchdog pandas eyed3 mutagen opencv-python numpy
     if errorlevel 1 (
         echo Failed to install required packages
         pause
