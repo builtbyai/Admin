@@ -63,23 +63,15 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Try simple version first if main version fails
-python text_organizer.py
-if %errorlevel% neq 0 (
-    echo.
-    echo Main version failed, trying simple version without AI dependencies...
-    python text_organizer_simple.py
-)
+REM Skip dependency installation and try minimal version due to Python environment issues
+echo Python environment appears corrupted, using minimal version...
+python text_organizer_minimal.py
 
 if %errorlevel% neq 0 (
     echo.
-    echo Error running the text organizer.
-    echo This might be due to Python environment issues.
-    echo Try creating a virtual environment:
-    echo   python -m venv text_organizer_env
-    echo   text_organizer_env\Scripts\activate
-    echo   pip install -r requirements_text_organizer.txt
-    echo   python text_organizer.py
+    echo Error running the minimal text organizer.
+    echo Your Python installation may be corrupted.
+    echo Consider reinstalling Python from https://python.org
     echo.
     pause
     exit /b 1
