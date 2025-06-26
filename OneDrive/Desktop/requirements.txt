@@ -1,0 +1,9 @@
+tkinter
+pillow>=9.0.0
+pytesseract>=0.3.10
+watchdog>=2.1.0
+pandas>=1.5.0
+eyed3>=0.9.6
+mutagen>=1.45.0
+opencv-python>=4.6.0
+numpy>=1.21.0
