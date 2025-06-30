@@ -25,10 +25,25 @@ class WebScraper:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith('#'):
-                        # Handle various URL formats
-                        if not line.startswith(('http://', 'https://')):
-                            line = 'https://' + line
-                        urls.append(line)
+                        # Extract URL from markdown-style links [text](url)
+                        import re
+                        markdown_link_pattern = r'\[.*?\]\((https?://[^\)]+)\)'
+                        markdown_match = re.search(markdown_link_pattern, line)
+                        
+                        if markdown_match:
+                            # Extract URL from markdown link
+                            url = markdown_match.group(1)
+                            urls.append(url)
+                        elif line.startswith(('http://', 'https://')):
+                            # Already a proper URL
+                            urls.append(line)
+                        elif re.match(r'^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', line):
+                            # Looks like a domain name without protocol
+                            urls.append('https://' + line)
+                        else:
+                            # Skip lines that don't look like URLs
+                            print(f"Skipping non-URL line: {line[:50]}...")
+                            continue
         except FileNotFoundError:
             print(f"Sources file not found: {self.sources_file}")
             return []
@@ -132,6 +147,20 @@ class WebScraper:
     def scrape_url(self, url):
         """Scrape a single URL and return content"""
         try:
+            # Clean up the URL
+            url = url.strip()
+            
+            # Validate URL format
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                print(f"Invalid URL format: {url}")
+                return {
+                    'title': 'Invalid URL',
+                    'url': url,
+                    'content': f"Invalid URL format: {url}",
+                    'success': False
+                }
+            
             print(f"Scraping: {url}")
             response = requests.get(url, headers=self.headers, timeout=30)
             response.raise_for_status()
@@ -157,8 +186,12 @@ class WebScraper:
             
         except Exception as e:
             print(f"Error scraping {url}: {str(e)}")
+            try:
+                title = urlparse(url).netloc
+            except:
+                title = 'Error'
             return {
-                'title': urlparse(url).netloc,
+                'title': title,
                 'url': url,
                 'content': f"Error scraping content: {str(e)}",
                 'success': False
