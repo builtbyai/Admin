@@ -1,5 +1,5 @@
 @echo off
-echo Starting Web Scraper...
+echo Starting Web Scraper with Media Collection...
 echo.
 
 REM Check if Python is installed
@@ -16,9 +16,18 @@ echo Installing required packages...
 pip install requests beautifulsoup4 urllib3
 
 echo.
-echo Running web scraper...
+echo ============================================================
+echo Web Scraper will:
+echo - Ask for URLs to scrape (or load from Sources.txt)
+echo - Download web pages and convert to Markdown
+echo - Download images and media files
+echo - Follow links recursively
+echo - Save everything in a timestamped folder
+echo ============================================================
+echo.
+
+REM Run the scraper
 python web_scraper.py
 
 echo.
-echo Scraping complete! Check the 'scraped_content' folder for results.
 pause

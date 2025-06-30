@@ -5,31 +5,81 @@ import re
 from urllib.parse import urljoin, urlparse
 import time
 from pathlib import Path
+from datetime import datetime
+import mimetypes
 
 class WebScraper:
-    def __init__(self, sources_file="E:\\Users\\Admin\\OneDrive\\Desktop\\Sources.txt", max_depth=2):
-        self.sources_file = sources_file
-        self.output_dir = Path("scraped_content")
-        self.output_dir.mkdir(exist_ok=True)
+    def __init__(self, max_depth=2):
         self.max_depth = max_depth
         self.visited_urls = set()
         self.file_counter = 0
+        self.media_counter = 0
+        
+        # Create unique output directory with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.base_output_dir = Path(f"scraped_content_{timestamp}")
+        self.output_dir = self.base_output_dir / "content"
+        self.media_dir = self.base_output_dir / "media"
+        
+        # Create directories
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.media_dir.mkdir(parents=True, exist_ok=True)
         
         # Headers to mimic a real browser
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
+        
+        # Media extensions to download
+        self.media_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.ico',
+                                '.mp4', '.webm', '.mp3', '.wav', '.pdf', '.doc', '.docx'}
     
-    def read_sources(self):
+    def get_user_urls(self):
+        """Get URLs from user input"""
+        urls = []
+        print("=" * 60)
+        print("Web Scraper with Media Collection")
+        print("=" * 60)
+        print("\nEnter URLs to scrape (one per line).")
+        print("Press Enter twice when done, or type 'file' to load from Sources.txt\n")
+        
+        while True:
+            url = input("URL: ").strip()
+            
+            if url.lower() == 'file':
+                # Load from file
+                return self.read_sources_file()
+            
+            if not url:
+                if urls:
+                    break
+                else:
+                    print("Please enter at least one URL.")
+                    continue
+            
+            # Clean and validate URL
+            if not url.startswith(('http://', 'https://')):
+                if re.match(r'^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', url):
+                    url = 'https://' + url
+                else:
+                    print(f"Invalid URL format: {url}")
+                    continue
+            
+            urls.append(url)
+            print(f"Added: {url}")
+        
+        return urls
+    
+    def read_sources_file(self):
         """Read URLs from the sources file"""
+        sources_file = "E:\\Users\\Admin\\OneDrive\\Desktop\\Sources.txt"
         urls = []
         try:
-            with open(self.sources_file, 'r', encoding='utf-8') as f:
+            with open(sources_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith('#'):
                         # Extract URL from markdown-style links [text](url)
-                        import re
                         markdown_link_pattern = r'\[.*?\]\((https?://[^\)]+)\)'
                         markdown_match = re.search(markdown_link_pattern, line)
                         
@@ -48,7 +98,7 @@ class WebScraper:
                             print(f"Skipping non-URL line: {line[:50]}...")
                             continue
         except FileNotFoundError:
-            print(f"Sources file not found: {self.sources_file}")
+            print(f"Sources file not found: {sources_file}")
             return []
         
         return urls
@@ -168,6 +218,78 @@ class WebScraper:
         
         return links
     
+    def extract_media_urls(self, soup, base_url):
+        """Extract all media URLs from the page"""
+        media_urls = set()
+        
+        # Find images
+        for img in soup.find_all('img'):
+            src = img.get('src') or img.get('data-src')
+            if src:
+                media_urls.add(urljoin(base_url, src))
+        
+        # Find videos
+        for video in soup.find_all(['video', 'source']):
+            src = video.get('src')
+            if src:
+                media_urls.add(urljoin(base_url, src))
+        
+        # Find links to media files
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            if any(href.lower().endswith(ext) for ext in self.media_extensions):
+                media_urls.add(urljoin(base_url, href))
+        
+        # Find background images in style attributes
+        for element in soup.find_all(style=True):
+            style = element['style']
+            urls = re.findall(r'url\(["\']?([^"\']+)["\']?\)', style)
+            for url in urls:
+                media_urls.add(urljoin(base_url, url))
+        
+        return media_urls
+    
+    def download_media(self, url, page_url):
+        """Download a media file"""
+        try:
+            # Skip if already downloaded
+            url_hash = str(abs(hash(url)))[:8]
+            
+            # Get file extension
+            parsed_url = urlparse(url)
+            path = parsed_url.path
+            ext = os.path.splitext(path)[1].lower()
+            
+            # If no extension, try to get from content-type
+            if not ext:
+                try:
+                    response = requests.head(url, headers=self.headers, timeout=10)
+                    content_type = response.headers.get('content-type', '')
+                    ext = mimetypes.guess_extension(content_type.split(';')[0]) or ''
+                except:
+                    ext = ''
+            
+            # Generate filename
+            self.media_counter += 1
+            domain = urlparse(page_url).netloc.replace('.', '_')
+            filename = f"{self.media_counter:04d}_{domain}_{url_hash}{ext}"
+            filepath = self.media_dir / filename
+            
+            # Download the file
+            response = requests.get(url, headers=self.headers, timeout=30)
+            response.raise_for_status()
+            
+            # Save the file
+            with open(filepath, 'wb') as f:
+                f.write(response.content)
+            
+            print(f"{'  ' * 2}Downloaded media: {filename}")
+            return str(filepath.relative_to(self.base_output_dir))
+            
+        except Exception as e:
+            print(f"{'  ' * 2}Error downloading media {url}: {str(e)}")
+            return None
+    
     def scrape_url(self, url, depth=0):
         """Scrape a single URL and return content with links"""
         try:
@@ -205,6 +327,20 @@ class WebScraper:
             # Extract all links from the page
             links = self.extract_links(soup, url)
             
+            # Extract media URLs
+            media_urls = self.extract_media_urls(soup, url)
+            
+            # Download media files
+            downloaded_media = []
+            print(f"{'  ' * depth}Found {len(media_urls)} media files")
+            for media_url in list(media_urls)[:20]:  # Limit to 20 media files per page
+                media_path = self.download_media(media_url, url)
+                if media_path:
+                    downloaded_media.append({
+                        'url': media_url,
+                        'local_path': media_path
+                    })
+            
             # Extract main content
             content = self.extract_content(soup)
             
@@ -216,6 +352,7 @@ class WebScraper:
                 'url': url,
                 'content': markdown_content,
                 'links': list(links),
+                'media': downloaded_media,
                 'success': True,
                 'depth': depth
             }
@@ -231,6 +368,7 @@ class WebScraper:
                 'url': url,
                 'content': f"Error scraping content: {str(e)}",
                 'links': [],
+                'media': [],
                 'success': False,
                 'depth': depth
             }
@@ -251,6 +389,13 @@ class WebScraper:
             if len(data['links']) > 50:
                 links_section += f"\n... and {len(data['links']) - 50} more links\n"
         
+        # Format media section
+        media_section = ""
+        if data.get('media'):
+            media_section = f"\n## Media Files ({len(data['media'])} downloaded)\n\n"
+            for media in data['media']:
+                media_section += f"- [{media['local_path']}]({media['url']})\n"
+        
         markdown_content = f"""# {data['title']}
 
 **Source URL:** {data['url']}
@@ -264,6 +409,7 @@ class WebScraper:
 
 ---
 {links_section}
+{media_section}
 """
         
         try:
@@ -311,16 +457,18 @@ class WebScraper:
     
     def run(self):
         """Main scraping process"""
-        urls = self.read_sources()
+        urls = self.get_user_urls()
         
         if not urls:
-            print("No URLs found in sources file.")
+            print("No URLs provided.")
             return
         
-        print(f"Found {len(urls)} URLs to scrape")
+        print(f"\nStarting scrape of {len(urls)} URLs")
         print(f"Max depth: {self.max_depth}")
-        print(f"Output directory: {self.output_dir.absolute()}")
-        print("-" * 50)
+        print(f"Output directory: {self.base_output_dir.absolute()}")
+        print(f"  Content: {self.output_dir.name}/")
+        print(f"  Media: {self.media_dir.name}/")
+        print("-" * 60)
         
         self.successful = 0
         self.failed = 0
@@ -328,14 +476,21 @@ class WebScraper:
         for url in urls:
             self.scrape_recursive(url, depth=0)
         
-        print("-" * 50)
+        print("-" * 60)
         print(f"\nScraping complete!")
         print(f"Successful: {self.successful}")
         print(f"Failed: {self.failed}")
-        print(f"Total files: {self.file_counter}")
+        print(f"Total content files: {self.file_counter}")
+        print(f"Total media files: {self.media_counter}")
         print(f"URLs visited: {len(self.visited_urls)}")
+        print(f"\nOutput saved to: {self.base_output_dir.absolute()}")
 
 if __name__ == "__main__":
     # You can adjust max_depth here (0 = only source URLs, 1 = source + their links, etc.)
-    scraper = WebScraper(max_depth=1)
-    scraper.run()
+    try:
+        scraper = WebScraper(max_depth=1)
+        scraper.run()
+    except KeyboardInterrupt:
+        print("\n\nScraping interrupted by user.")
+    except Exception as e:
+        print(f"\n\nError: {str(e)}")
