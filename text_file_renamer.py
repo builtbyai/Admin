@@ -109,33 +109,43 @@ class MediaFileRenamer:
             self.rename_mappings = {}
             lines = content.strip().split('\n')
             
-            # Parse the file looking for "Original file name" and "New file name" patterns
+            # Parse the file looking for pairs of lines
+            # First line after "Original file name" header is the original name
+            # First line after "New file name" header is the new name
             i = 0
+            current_original = None
+            
             while i < len(lines):
                 line = lines[i].strip()
                 
-                # Look for "Original file name" header or just a filename
-                if i + 1 < len(lines):
-                    original = line
-                    new_name = lines[i + 1].strip()
-                    
-                    # Skip if lines look like headers
-                    if 'original' in original.lower() and 'file' in original.lower():
+                # Check for headers
+                if 'original' in line.lower() and 'file' in line.lower():
+                    # Next non-empty line is the original filename
+                    i += 1
+                    while i < len(lines) and not lines[i].strip():
                         i += 1
-                        continue
-                    if 'new' in new_name.lower() and 'file' in new_name.lower():
+                    if i < len(lines):
+                        current_original = lines[i].strip().strip('"\'')
+                elif 'new' in line.lower() and 'file' in line.lower():
+                    # Next non-empty line is the new filename
+                    i += 1
+                    while i < len(lines) and not lines[i].strip():
                         i += 1
-                        continue
-                        
-                    # If both lines look like filenames, treat as a mapping
-                    if original and new_name and not original.startswith('#'):
-                        # Remove any quotes
-                        original = original.strip('"\'')
-                        new_name = new_name.strip('"\'')
-                        self.rename_mappings[original.lower()] = new_name
-                        i += 2
-                        continue
-                        
+                    if i < len(lines) and current_original:
+                        new_name = lines[i].strip().strip('"\'')
+                        self.rename_mappings[current_original.lower()] = new_name
+                        current_original = None
+                elif line and not line.startswith('#'):
+                    # Alternative format: consecutive non-header lines
+                    if i + 1 < len(lines):
+                        next_line = lines[i + 1].strip()
+                        if next_line and not next_line.startswith('#'):
+                            # Treat as original -> new mapping
+                            original = line.strip('"\'')
+                            new_name = next_line.strip('"\'')
+                            self.rename_mappings[original.lower()] = new_name
+                            i += 1  # Skip the next line since we used it
+                            
                 i += 1
                 
             # Update info display
@@ -165,7 +175,7 @@ class MediaFileRenamer:
             messagebox.showwarning("No Instructions", "Please load instructions first")
             return
             
-        self.clear_list()
+        self.clear_all()
         
         # Media file extensions
         media_extensions = [
