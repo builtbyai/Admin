@@ -21,24 +21,20 @@ echo Text File Analyzer with OpenRouter API
 echo ============================================================
 echo.
 echo This tool will:
+echo - Prompt for OpenRouter API key at startup
 echo - Let you select multiple text/markdown files
-echo - Chunk files into 50,000 character segments
-echo - Analyze each chunk for themes and content
-echo - Create relational database tables with:
-echo   * File information and summaries
-echo   * Themes and their relationships
-echo   * Keywords and tags (5 per file)
-echo   * Key points and insights
-echo   * Cross-file relationships
-echo - Export results to:
-echo   * Excel workbook with multiple sheets
-echo   * CSV files for all database tables
-echo   * Text summary report
+echo - Use AI to intelligently categorize content
+echo - Create smart CSV tables organized by:
+echo   * Categories and subcategories
+echo   * Themes and topics
+echo   * Content types and domains
+echo   * Tags (5 per file)
+echo - Generate summaries for each file
+echo - Export only CSV files (no database)
 echo.
-echo Using Google Gemini 2.5 Pro (Enhanced capabilities)
+echo Using Google Gemini 2.5 Pro for intelligent analysis
 echo.
-echo You'll need an OpenRouter API key.
-echo Get one at: https://openrouter.ai/
+echo Get your API key at: https://openrouter.ai/
 echo.
 echo ============================================================
 echo.

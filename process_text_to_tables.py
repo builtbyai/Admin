@@ -3,14 +3,13 @@ import re
 import json
 import time
 import requests
-import sqlite3
-import hashlib
 from pathlib import Path
 from datetime import datetime
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, simpledialog
 from collections import Counter, defaultdict
 import pandas as pd
+import csv
 
 class TextAnalyzer:
     def __init__(self):
@@ -28,26 +27,19 @@ class TextAnalyzer:
         # Chunk size (50,000 characters)
         self.chunk_size = 50000
         
-        # Database setup
-        self.db_path = self.output_dir / f"analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-        self.conn = None
-        self.cursor = None
+        # Storage for analysis results
+        self.analysis_results = []
+        self.file_summaries = []
+        self.themes_data = []
+        self.categories_data = []
         
-    def get_api_key(self):
-        """Get API key from user or file"""
-        api_key_file = Path("openrouter_api_key.txt")
+    def prompt_api_key(self):
+        """Prompt for API key at startup"""
+        root = tk.Tk()
+        root.withdraw()
         
-        if api_key_file.exists():
-            with open(api_key_file, 'r') as f:
-                self.api_key = f.read().strip()
-        else:
-            root = tk.Tk()
-            root.withdraw()
-            
-            from tkinter import simpledialog
-            
-            # Create a more detailed dialog
-            message = """Enter your OpenRouter API key:
+        # Create a more detailed dialog
+        message = """Enter your OpenRouter API key:
 
 This script uses Google's Gemini 2.5 Pro model for advanced text analysis.
 
@@ -57,20 +49,20 @@ To get an API key:
 3. Generate an API key from your dashboard
 4. Paste it below
 
-Your API key will be saved locally for future use."""
-            
-            api_key = simpledialog.askstring(
-                "OpenRouter API Key Required",
-                message,
-                show='*'
-            )
-            
-            if api_key:
-                self.api_key = api_key
-                with open(api_key_file, 'w') as f:
-                    f.write(api_key)
-            else:
-                raise ValueError("API key is required")
+Your API key will be used for this session only."""
+        
+        api_key = simpledialog.askstring(
+            "OpenRouter API Key Required",
+            message,
+            show='*'
+        )
+        
+        if api_key:
+            self.api_key = api_key
+            return True
+        else:
+            print("API key is required to continue.")
+            return False
     
     def select_files(self):
         """Open file dialog to select text/markdown files"""
@@ -89,136 +81,46 @@ Your API key will be saved locally for future use."""
         self.selected_files = list(files)
         return self.selected_files
     
-    def setup_database(self):
-        """Create database tables for storing analysis results"""
-        self.conn = sqlite3.connect(self.db_path)
-        self.cursor = self.conn.cursor()
+    def categorize_content_with_llm(self, file_data):
+        """Use LLM to intelligently categorize content"""
+        prompt = f"""Analyze this file and provide smart categorization:
+
+Filename: {file_data['filename']}
+Content preview (first 2000 chars): {file_data['content'][:2000]}...
+
+Provide a JSON response with:
+1. "category": The main category this content belongs to (e.g., "Technical Documentation", "Business Report", "Research Paper", etc.)
+2. "subcategory": A more specific subcategory
+3. "primary_theme": The main theme or topic
+4. "content_type": Type of content (e.g., "Tutorial", "Analysis", "Reference", etc.)
+5. "domain": The field or domain (e.g., "Software Development", "Marketing", "Science", etc.)
+6. "tags": List of 5 relevant tags
+7. "summary": A 2-3 sentence summary
+8. "key_topics": List of 3-5 key topics covered
+
+Format as valid JSON."""
+
+        response = self.call_llm(prompt, max_tokens=1000)
         
-        # Files table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS files (
-                file_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL,
-                filepath TEXT NOT NULL,
-                file_hash TEXT UNIQUE,
-                total_size INTEGER,
-                chunk_count INTEGER,
-                processed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        if response:
+            try:
+                json_match = re.search(r'\{[\s\S]*\}', response)
+                if json_match:
+                    return json.loads(json_match.group())
+            except:
+                pass
         
-        # Chunks table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS chunks (
-                chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file_id INTEGER,
-                chunk_number INTEGER,
-                chunk_size INTEGER,
-                content TEXT,
-                summary TEXT,
-                themes TEXT,
-                FOREIGN KEY (file_id) REFERENCES files(file_id)
-            )
-        ''')
-        
-        # Themes table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS themes (
-                theme_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                theme_name TEXT UNIQUE,
-                description TEXT,
-                occurrence_count INTEGER DEFAULT 0
-            )
-        ''')
-        
-        # File themes relationship table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS file_themes (
-                file_id INTEGER,
-                theme_id INTEGER,
-                relevance_score REAL,
-                PRIMARY KEY (file_id, theme_id),
-                FOREIGN KEY (file_id) REFERENCES files(file_id),
-                FOREIGN KEY (theme_id) REFERENCES themes(theme_id)
-            )
-        ''')
-        
-        # Tags table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS tags (
-                tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tag_name TEXT UNIQUE
-            )
-        ''')
-        
-        # File tags relationship table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS file_tags (
-                file_id INTEGER,
-                tag_id INTEGER,
-                PRIMARY KEY (file_id, tag_id),
-                FOREIGN KEY (file_id) REFERENCES files(file_id),
-                FOREIGN KEY (tag_id) REFERENCES tags(tag_id)
-            )
-        ''')
-        
-        # Key points table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS key_points (
-                point_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file_id INTEGER,
-                point_text TEXT,
-                importance_score REAL,
-                FOREIGN KEY (file_id) REFERENCES files(file_id)
-            )
-        ''')
-        
-        # Keywords table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS keywords (
-                keyword_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                keyword TEXT UNIQUE,
-                frequency INTEGER DEFAULT 0
-            )
-        ''')
-        
-        # File keywords relationship table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS file_keywords (
-                file_id INTEGER,
-                keyword_id INTEGER,
-                frequency INTEGER,
-                PRIMARY KEY (file_id, keyword_id),
-                FOREIGN KEY (file_id) REFERENCES files(file_id),
-                FOREIGN KEY (keyword_id) REFERENCES keywords(keyword_id)
-            )
-        ''')
-        
-        # Summary table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS summaries (
-                summary_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file_id INTEGER,
-                summary_text TEXT,
-                summary_type TEXT,
-                FOREIGN KEY (file_id) REFERENCES files(file_id)
-            )
-        ''')
-        
-        # Cross-file relationships table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS file_relationships (
-                relationship_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file1_id INTEGER,
-                file2_id INTEGER,
-                relationship_type TEXT,
-                similarity_score REAL,
-                FOREIGN KEY (file1_id) REFERENCES files(file_id),
-                FOREIGN KEY (file2_id) REFERENCES files(file_id)
-            )
-        ''')
-        
-        self.conn.commit()
+        # Fallback categorization
+        return {
+            "category": "General",
+            "subcategory": "Uncategorized",
+            "primary_theme": "Unknown",
+            "content_type": "Document",
+            "domain": "General",
+            "tags": ["unprocessed"],
+            "summary": "Unable to process",
+            "key_topics": []
+        }
     
     def chunk_text(self, text, chunk_size=50000):
         """Split text into chunks of specified size"""
@@ -360,32 +262,28 @@ Format your response as JSON with these exact keys:
             print(f"Error reading file: {str(e)}")
             return None
         
-        # Calculate file hash
-        file_hash = hashlib.md5(content.encode()).hexdigest()
+        filename = Path(filepath).name
         
-        # Check if file already processed
-        self.cursor.execute("SELECT file_id FROM files WHERE file_hash = ?", (file_hash,))
-        existing = self.cursor.fetchone()
-        if existing:
-            print(f"File already processed (ID: {existing[0]})")
-            return existing[0]
+        # Get intelligent categorization
+        file_data = {
+            'filename': filename,
+            'filepath': str(filepath),
+            'content': content,
+            'size': len(content)
+        }
+        
+        print("  Getting smart categorization...")
+        categorization = self.categorize_content_with_llm(file_data)
         
         # Chunk the content
         chunks = self.chunk_text(content, self.chunk_size)
-        print(f"Split into {len(chunks)} chunks")
-        
-        # Insert file record
-        filename = Path(filepath).name
-        self.cursor.execute('''
-            INSERT INTO files (filename, filepath, file_hash, total_size, chunk_count)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (filename, str(filepath), file_hash, len(content), len(chunks)))
-        file_id = self.cursor.lastrowid
+        print(f"  Split into {len(chunks)} chunks")
         
         # Process each chunk
+        chunk_summaries = []
         all_themes = []
         all_keywords = []
-        all_tags = []
+        all_tags = categorization.get('tags', [])
         all_key_points = []
         
         for i, chunk in enumerate(chunks, 1):
@@ -394,425 +292,257 @@ Format your response as JSON with these exact keys:
             analysis = self.analyze_chunk(chunk, i, len(chunks), filename)
             
             if analysis:
-                # Store chunk data
-                self.cursor.execute('''
-                    INSERT INTO chunks (file_id, chunk_number, chunk_size, content, summary, themes)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (file_id, i, len(chunk), chunk, analysis.get('summary', ''), 
-                      json.dumps(analysis.get('themes', []))))
-                
-                # Collect data for aggregation
+                chunk_summaries.append(analysis.get('summary', ''))
                 all_themes.extend(analysis.get('themes', []))
                 all_keywords.extend(analysis.get('keywords', []))
                 all_tags.extend(analysis.get('tags', []))
                 all_key_points.extend(analysis.get('key_points', []))
-                
-                # Store summary
-                if analysis.get('summary'):
-                    self.cursor.execute('''
-                        INSERT INTO summaries (file_id, summary_text, summary_type)
-                        VALUES (?, ?, ?)
-                    ''', (file_id, analysis['summary'], f'chunk_{i}'))
             
             # Rate limiting
             time.sleep(2)
         
-        # Process aggregated data
-        self.process_themes(file_id, all_themes)
-        self.process_keywords(file_id, all_keywords)
-        self.process_tags(file_id, all_tags)
-        self.process_key_points(file_id, all_key_points)
-        
         # Generate overall file summary
-        self.generate_file_summary(file_id, chunks)
+        overall_summary = self.generate_file_summary(filename, chunk_summaries)
         
-        self.conn.commit()
-        return file_id
-    
-    def process_themes(self, file_id, themes):
-        """Process and store themes"""
-        theme_counts = Counter(themes)
+        # Compile results
+        file_result = {
+            'filename': filename,
+            'filepath': str(filepath),
+            'file_size': len(content),
+            'chunk_count': len(chunks),
+            'category': categorization.get('category', 'General'),
+            'subcategory': categorization.get('subcategory', 'Uncategorized'),
+            'primary_theme': categorization.get('primary_theme', 'Unknown'),
+            'content_type': categorization.get('content_type', 'Document'),
+            'domain': categorization.get('domain', 'General'),
+            'summary': overall_summary or categorization.get('summary', ''),
+            'tags': ', '.join(list(set(all_tags))[:5]),  # Top 5 unique tags
+            'themes': ', '.join(list(set(all_themes))[:10]),  # Top 10 themes
+            'keywords': ', '.join(list(set(all_keywords))[:20]),  # Top 20 keywords
+            'key_points': ' | '.join(all_key_points[:5]),  # Top 5 key points
+            'processed_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
         
-        for theme, count in theme_counts.items():
-            # Insert or get theme
-            self.cursor.execute("SELECT theme_id FROM themes WHERE theme_name = ?", (theme,))
-            result = self.cursor.fetchone()
-            
-            if result:
-                theme_id = result[0]
-                self.cursor.execute(
-                    "UPDATE themes SET occurrence_count = occurrence_count + ? WHERE theme_id = ?",
-                    (count, theme_id)
-                )
-            else:
-                self.cursor.execute(
-                    "INSERT INTO themes (theme_name, occurrence_count) VALUES (?, ?)",
-                    (theme, count)
-                )
-                theme_id = self.cursor.lastrowid
-            
-            # Link theme to file
-            relevance_score = count / len(themes) if themes else 0
-            self.cursor.execute('''
-                INSERT INTO file_themes (file_id, theme_id, relevance_score)
-                VALUES (?, ?, ?)
-            ''', (file_id, theme_id, relevance_score))
-    
-    def process_keywords(self, file_id, keywords):
-        """Process and store keywords"""
-        keyword_counts = Counter(keywords)
+        self.analysis_results.append(file_result)
         
-        for keyword, count in keyword_counts.items():
-            # Insert or get keyword
-            self.cursor.execute("SELECT keyword_id FROM keywords WHERE keyword = ?", (keyword,))
-            result = self.cursor.fetchone()
-            
-            if result:
-                keyword_id = result[0]
-                self.cursor.execute(
-                    "UPDATE keywords SET frequency = frequency + ? WHERE keyword_id = ?",
-                    (count, keyword_id)
-                )
-            else:
-                self.cursor.execute(
-                    "INSERT INTO keywords (keyword, frequency) VALUES (?, ?)",
-                    (keyword, count)
-                )
-                keyword_id = self.cursor.lastrowid
-            
-            # Link keyword to file
-            self.cursor.execute('''
-                INSERT INTO file_keywords (file_id, keyword_id, frequency)
-                VALUES (?, ?, ?)
-            ''', (file_id, keyword_id, count))
-    
-    def process_tags(self, file_id, tags):
-        """Process and store tags (limit to 5 most common)"""
-        tag_counts = Counter(tags)
-        top_tags = [tag for tag, _ in tag_counts.most_common(5)]
+        # Add to themed collections
+        self.organize_by_theme(file_result)
         
-        for tag in top_tags:
-            # Insert or get tag
-            self.cursor.execute("SELECT tag_id FROM tags WHERE tag_name = ?", (tag,))
-            result = self.cursor.fetchone()
-            
-            if result:
-                tag_id = result[0]
-            else:
-                self.cursor.execute("INSERT INTO tags (tag_name) VALUES (?)", (tag,))
-                tag_id = self.cursor.lastrowid
-            
-            # Link tag to file
-            self.cursor.execute('''
-                INSERT OR IGNORE INTO file_tags (file_id, tag_id)
-                VALUES (?, ?)
-            ''', (file_id, tag_id))
+        return file_result
     
-    def process_key_points(self, file_id, key_points):
-        """Process and store key points"""
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_points = []
-        for point in key_points:
-            if point not in seen:
-                seen.add(point)
-                unique_points.append(point)
+    def organize_by_theme(self, file_result):
+        """Organize files into themed collections"""
+        # Add to category-based collection
+        category_entry = {
+            'category': file_result['category'],
+            'subcategory': file_result['subcategory'],
+            'filename': file_result['filename'],
+            'domain': file_result['domain'],
+            'content_type': file_result['content_type'],
+            'primary_theme': file_result['primary_theme'],
+            'summary': file_result['summary'],
+            'tags': file_result['tags']
+        }
+        self.categories_data.append(category_entry)
         
-        # Calculate importance scores based on position and frequency
-        for i, point in enumerate(unique_points[:20]):  # Limit to top 20
-            importance_score = 1.0 - (i / len(unique_points))
-            self.cursor.execute('''
-                INSERT INTO key_points (file_id, point_text, importance_score)
-                VALUES (?, ?, ?)
-            ''', (file_id, point, importance_score))
+        # Add to theme-based collection
+        themes = file_result['themes'].split(', ') if file_result['themes'] else []
+        for theme in themes[:3]:  # Top 3 themes
+            theme_entry = {
+                'theme': theme,
+                'filename': file_result['filename'],
+                'category': file_result['category'],
+                'relevance': 'High' if theme == file_result['primary_theme'] else 'Medium',
+                'summary_excerpt': file_result['summary'][:200] + '...' if len(file_result['summary']) > 200 else file_result['summary']
+            }
+            self.themes_data.append(theme_entry)
     
-    def generate_file_summary(self, file_id, chunks):
+    def generate_file_summary(self, filename, chunk_summaries):
         """Generate overall summary for the file"""
-        # Get all chunk summaries
-        self.cursor.execute(
-            "SELECT summary FROM chunks WHERE file_id = ? ORDER BY chunk_number",
-            (file_id,)
-        )
-        chunk_summaries = [row[0] for row in self.cursor.fetchall()]
-        
         if not chunk_summaries:
-            return
+            return ""
         
         # Combine summaries for overall analysis
         combined_summary = "\n\n".join(chunk_summaries)
         
-        prompt = f"""Based on these chunk summaries, create a comprehensive overall summary of the entire document.
+        prompt = f"""Based on these chunk summaries from {filename}, create a comprehensive overall summary.
 
 Chunk summaries:
 {combined_summary[:40000]}
 
-Provide:
-1. A comprehensive summary (3-5 paragraphs)
-2. Main conclusions or insights
-3. How different parts of the document relate to each other
+Provide a concise summary (2-3 paragraphs) that captures:
+1. The main purpose and content
+2. Key insights or findings
+3. Overall significance
 
 Format as clear text, not JSON."""
 
-        overall_summary = self.call_llm(prompt, max_tokens=1500)
-        
-        if overall_summary:
-            self.cursor.execute('''
-                INSERT INTO summaries (file_id, summary_text, summary_type)
-                VALUES (?, ?, ?)
-            ''', (file_id, overall_summary, 'overall'))
+        overall_summary = self.call_llm(prompt, max_tokens=1000)
+        return overall_summary or "Summary generation failed"
     
-    def find_file_relationships(self):
-        """Find relationships between files based on themes and keywords"""
-        print("\nAnalyzing relationships between files...")
+    def create_smart_tables(self):
+        """Create intelligently organized CSV tables"""
+        print("\nCreating smart categorized tables...")
         
-        # Get all files
-        self.cursor.execute("SELECT file_id FROM files")
-        file_ids = [row[0] for row in self.cursor.fetchall()]
+        # Create main analysis table
+        main_df = pd.DataFrame(self.analysis_results)
         
-        for i, file1_id in enumerate(file_ids):
-            for file2_id in file_ids[i+1:]:
-                # Calculate similarity based on shared themes
-                self.cursor.execute('''
-                    SELECT COUNT(*) as shared_themes,
-                           AVG(ft1.relevance_score + ft2.relevance_score) as avg_relevance
-                    FROM file_themes ft1
-                    JOIN file_themes ft2 ON ft1.theme_id = ft2.theme_id
-                    WHERE ft1.file_id = ? AND ft2.file_id = ?
-                ''', (file1_id, file2_id))
-                
-                result = self.cursor.fetchone()
-                shared_themes = result[0] if result else 0
-                avg_relevance = result[1] if result and result[1] else 0
-                
-                if shared_themes > 0:
-                    # Calculate similarity score
-                    similarity_score = shared_themes * avg_relevance
-                    
-                    self.cursor.execute('''
-                        INSERT INTO file_relationships 
-                        (file1_id, file2_id, relationship_type, similarity_score)
-                        VALUES (?, ?, ?, ?)
-                    ''', (file1_id, file2_id, 'thematic_similarity', similarity_score))
+        # Create category-based pivot table
+        if self.categories_data:
+            category_df = pd.DataFrame(self.categories_data)
+            
+            # Group by category and domain
+            category_summary = category_df.groupby(['category', 'domain']).agg({
+                'filename': 'count',
+                'subcategory': lambda x: ', '.join(set(x))
+            }).reset_index()
+            category_summary.columns = ['Category', 'Domain', 'File_Count', 'Subcategories']
         
-        self.conn.commit()
+        # Create theme analysis table
+        if self.themes_data:
+            theme_df = pd.DataFrame(self.themes_data)
+            
+            # Theme frequency analysis
+            theme_freq = theme_df['theme'].value_counts().reset_index()
+            theme_freq.columns = ['Theme', 'Frequency']
+        
+        # Create content type distribution
+        content_type_dist = main_df.groupby(['content_type', 'category']).size().reset_index(name='Count')
+        
+        # Create tag cloud data
+        all_tags = []
+        for tags in main_df['tags']:
+            if tags:
+                all_tags.extend(tags.split(', '))
+        tag_freq = pd.Series(all_tags).value_counts().reset_index()
+        tag_freq.columns = ['Tag', 'Frequency']
+        
+        return {
+            'main_analysis': main_df,
+            'category_summary': category_summary if 'category_summary' in locals() else None,
+            'theme_analysis': theme_df if self.themes_data else None,
+            'theme_frequency': theme_freq if 'theme_freq' in locals() else None,
+            'content_type_distribution': content_type_dist,
+            'tag_frequency': tag_freq
+        }
     
     def export_results(self):
-        """Export analysis results to various formats"""
-        print("\nExporting results...")
+        """Export analysis results to CSV files"""
+        print("\nExporting results to CSV files...")
         
-        # Create CSV subdirectory
-        csv_dir = self.output_dir / "csv_exports"
+        # Create CSV subdirectory with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        csv_dir = self.output_dir / f"csv_analysis_{timestamp}"
         csv_dir.mkdir(exist_ok=True)
         
-        # Export all tables to CSV
-        self.export_all_tables_to_csv(csv_dir)
+        # Get smart tables
+        tables = self.create_smart_tables()
         
-        # Export to Excel
-        excel_file = self.output_dir / f"analysis_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        # Export main analysis table
+        if tables['main_analysis'] is not None and not tables['main_analysis'].empty:
+            main_file = csv_dir / "01_complete_file_analysis.csv"
+            tables['main_analysis'].to_csv(main_file, index=False, encoding='utf-8')
+            print(f"  ✓ Exported: {main_file.name}")
         
-        with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
-            # Files overview
-            files_df = pd.read_sql_query(
-                "SELECT * FROM files ORDER BY filename",
-                self.conn
-            )
-            files_df.to_excel(writer, sheet_name='Files', index=False)
-            
-            # Themes analysis
-            themes_df = pd.read_sql_query('''
-                SELECT t.theme_name, t.occurrence_count, 
-                       GROUP_CONCAT(f.filename) as files
-                FROM themes t
-                JOIN file_themes ft ON t.theme_id = ft.theme_id
-                JOIN files f ON ft.file_id = f.file_id
-                GROUP BY t.theme_id
-                ORDER BY t.occurrence_count DESC
-            ''', self.conn)
-            themes_df.to_excel(writer, sheet_name='Themes', index=False)
-            
-            # Keywords analysis
-            keywords_df = pd.read_sql_query('''
-                SELECT k.keyword, k.frequency,
-                       COUNT(DISTINCT fk.file_id) as file_count
-                FROM keywords k
-                JOIN file_keywords fk ON k.keyword_id = fk.keyword_id
-                GROUP BY k.keyword_id
-                ORDER BY k.frequency DESC
-                LIMIT 100
-            ''', self.conn)
-            keywords_df.to_excel(writer, sheet_name='Top Keywords', index=False)
-            
-            # File relationships
-            relationships_df = pd.read_sql_query('''
-                SELECT f1.filename as file1, f2.filename as file2,
-                       fr.relationship_type, fr.similarity_score
-                FROM file_relationships fr
-                JOIN files f1 ON fr.file1_id = f1.file_id
-                JOIN files f2 ON fr.file2_id = f2.file_id
-                ORDER BY fr.similarity_score DESC
-            ''', self.conn)
-            relationships_df.to_excel(writer, sheet_name='File Relationships', index=False)
-            
-            # Summaries
-            summaries_df = pd.read_sql_query('''
-                SELECT f.filename, s.summary_type, s.summary_text
-                FROM summaries s
-                JOIN files f ON s.file_id = f.file_id
-                WHERE s.summary_type = 'overall'
-                ORDER BY f.filename
-            ''', self.conn)
-            summaries_df.to_excel(writer, sheet_name='Summaries', index=False)
+        # Export category summary
+        if tables['category_summary'] is not None and not tables['category_summary'].empty:
+            cat_file = csv_dir / "02_category_summary.csv"
+            tables['category_summary'].to_csv(cat_file, index=False, encoding='utf-8')
+            print(f"  ✓ Exported: {cat_file.name}")
         
-        print(f"Results exported to: {excel_file}")
+        # Export theme analysis
+        if tables['theme_analysis'] is not None and not tables['theme_analysis'].empty:
+            theme_file = csv_dir / "03_theme_analysis.csv"
+            tables['theme_analysis'].to_csv(theme_file, index=False, encoding='utf-8')
+            print(f"  ✓ Exported: {theme_file.name}")
         
-        # Also create a summary report
-        self.create_summary_report()
+        # Export theme frequency
+        if tables['theme_frequency'] is not None and not tables['theme_frequency'].empty:
+            theme_freq_file = csv_dir / "04_theme_frequency.csv"
+            tables['theme_frequency'].to_csv(theme_freq_file, index=False, encoding='utf-8')
+            print(f"  ✓ Exported: {theme_freq_file.name}")
+        
+        # Export content type distribution
+        if tables['content_type_distribution'] is not None and not tables['content_type_distribution'].empty:
+            content_file = csv_dir / "05_content_type_distribution.csv"
+            tables['content_type_distribution'].to_csv(content_file, index=False, encoding='utf-8')
+            print(f"  ✓ Exported: {content_file.name}")
+        
+        # Export tag frequency
+        if tables['tag_frequency'] is not None and not tables['tag_frequency'].empty:
+            tag_file = csv_dir / "06_tag_cloud_data.csv"
+            tables['tag_frequency'].to_csv(tag_file, index=False, encoding='utf-8')
+            print(f"  ✓ Exported: {tag_file.name}")
+        
+        # Create a summary report
+        self.create_summary_report(csv_dir, tables)
+        
+        print(f"\n✓ All CSV files exported to: {csv_dir}")
+        return csv_dir
     
-    def export_all_tables_to_csv(self, csv_dir):
-        """Export all database tables to CSV files"""
-        print("Exporting database tables to CSV...")
-        
-        # Get all table names
-        self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in self.cursor.fetchall()]
-        
-        for table in tables:
-            try:
-                # Read table into DataFrame
-                df = pd.read_sql_query(f"SELECT * FROM {table}", self.conn)
-                
-                # Save to CSV
-                csv_file = csv_dir / f"{table}.csv"
-                df.to_csv(csv_file, index=False, encoding='utf-8')
-                print(f"  - Exported {table}.csv ({len(df)} rows)")
-                
-            except Exception as e:
-                print(f"  - Error exporting {table}: {str(e)}")
-        
-        # Also export some custom queries as CSV
-        
-        # Files with all relationships
-        query = '''
-            SELECT f.*, 
-                   GROUP_CONCAT(DISTINCT t.tag_name) as tags,
-                   COUNT(DISTINCT ft.theme_id) as theme_count,
-                   COUNT(DISTINCT fk.keyword_id) as keyword_count
-            FROM files f
-            LEFT JOIN file_tags ftg ON f.file_id = ftg.file_id
-            LEFT JOIN tags t ON ftg.tag_id = t.tag_id
-            LEFT JOIN file_themes ft ON f.file_id = ft.file_id
-            LEFT JOIN file_keywords fk ON f.file_id = fk.file_id
-            GROUP BY f.file_id
-        '''
-        df = pd.read_sql_query(query, self.conn)
-        df.to_csv(csv_dir / "files_with_metadata.csv", index=False)
-        print("  - Exported files_with_metadata.csv")
-        
-        # Theme analysis
-        query = '''
-            SELECT t.theme_name, t.occurrence_count,
-                   COUNT(DISTINCT ft.file_id) as file_count,
-                   AVG(ft.relevance_score) as avg_relevance,
-                   GROUP_CONCAT(DISTINCT f.filename) as files
-            FROM themes t
-            JOIN file_themes ft ON t.theme_id = ft.theme_id
-            JOIN files f ON ft.file_id = f.file_id
-            GROUP BY t.theme_id
-            ORDER BY t.occurrence_count DESC
-        '''
-        df = pd.read_sql_query(query, self.conn)
-        df.to_csv(csv_dir / "theme_analysis.csv", index=False)
-        print("  - Exported theme_analysis.csv")
-        
-        # Keyword analysis
-        query = '''
-            SELECT k.keyword, k.frequency,
-                   COUNT(DISTINCT fk.file_id) as file_count,
-                   GROUP_CONCAT(DISTINCT f.filename) as files
-            FROM keywords k
-            JOIN file_keywords fk ON k.keyword_id = fk.keyword_id
-            JOIN files f ON fk.file_id = f.file_id
-            GROUP BY k.keyword_id
-            ORDER BY k.frequency DESC
-        '''
-        df = pd.read_sql_query(query, self.conn)
-        df.to_csv(csv_dir / "keyword_analysis.csv", index=False)
-        print("  - Exported keyword_analysis.csv")
-        
-        # All summaries
-        query = '''
-            SELECT f.filename, s.summary_type, s.summary_text
-            FROM summaries s
-            JOIN files f ON s.file_id = f.file_id
-            ORDER BY f.filename, s.summary_type
-        '''
-        df = pd.read_sql_query(query, self.conn)
-        df.to_csv(csv_dir / "all_summaries.csv", index=False)
-        print("  - Exported all_summaries.csv")
-        
-        # Key points with scores
-        query = '''
-            SELECT f.filename, kp.point_text, kp.importance_score
-            FROM key_points kp
-            JOIN files f ON kp.file_id = f.file_id
-            ORDER BY f.filename, kp.importance_score DESC
-        '''
-        df = pd.read_sql_query(query, self.conn)
-        df.to_csv(csv_dir / "key_points.csv", index=False)
-        print("  - Exported key_points.csv")
-        
-        print(f"\nAll CSV files exported to: {csv_dir}")
-    
-    def create_summary_report(self):
+    def create_summary_report(self, csv_dir, tables):
         """Create a text summary report"""
-        report_file = self.output_dir / f"analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        report_file = csv_dir / "00_analysis_summary_report.txt"
         
         with open(report_file, 'w', encoding='utf-8') as f:
-            f.write("TEXT ANALYSIS REPORT\n")
+            f.write("TEXT ANALYSIS SUMMARY REPORT\n")
             f.write("=" * 60 + "\n\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Database: {self.db_path}\n\n")
+            f.write(f"Output Directory: {csv_dir.name}\n\n")
             
             # Files processed
-            self.cursor.execute("SELECT COUNT(*) FROM files")
-            file_count = self.cursor.fetchone()[0]
+            file_count = len(self.analysis_results)
             f.write(f"Files Processed: {file_count}\n\n")
             
+            # Category distribution
+            if tables['main_analysis'] is not None and not tables['main_analysis'].empty:
+                f.write("CATEGORY DISTRIBUTION:\n")
+                f.write("-" * 40 + "\n")
+                cat_dist = tables['main_analysis']['category'].value_counts()
+                for cat, count in cat_dist.items():
+                    f.write(f"  - {cat}: {count} files\n")
+                f.write("\n")
+            
             # Top themes
-            f.write("TOP THEMES:\n")
-            f.write("-" * 40 + "\n")
-            self.cursor.execute('''
-                SELECT theme_name, occurrence_count
-                FROM themes
-                ORDER BY occurrence_count DESC
-                LIMIT 10
-            ''')
-            for theme, count in self.cursor.fetchall():
-                f.write(f"  - {theme}: {count} occurrences\n")
+            if tables['theme_frequency'] is not None and not tables['theme_frequency'].empty:
+                f.write("TOP THEMES:\n")
+                f.write("-" * 40 + "\n")
+                for _, row in tables['theme_frequency'].head(10).iterrows():
+                    f.write(f"  - {row['Theme']}: {row['Frequency']} occurrences\n")
+                f.write("\n")
+            
+            # Content type distribution
+            if tables['main_analysis'] is not None and not tables['main_analysis'].empty:
+                f.write("CONTENT TYPES:\n")
+                f.write("-" * 40 + "\n")
+                content_dist = tables['main_analysis']['content_type'].value_counts()
+                for ctype, count in content_dist.items():
+                    f.write(f"  - {ctype}: {count} files\n")
+                f.write("\n")
             
             # File summaries
-            f.write("\n\nFILE SUMMARIES:\n")
+            f.write("\nFILE SUMMARIES:\n")
             f.write("-" * 40 + "\n")
-            self.cursor.execute('''
-                SELECT f.filename, s.summary_text
-                FROM files f
-                JOIN summaries s ON f.file_id = s.file_id
-                WHERE s.summary_type = 'overall'
-                ORDER BY f.filename
-            ''')
-            for filename, summary in self.cursor.fetchall():
-                f.write(f"\n{filename}:\n{summary}\n")
+            for result in self.analysis_results[:10]:  # First 10 files
+                f.write(f"\n{result['filename']}:\n")
+                f.write(f"Category: {result['category']} > {result['subcategory']}\n")
+                f.write(f"Tags: {result['tags']}\n")
+                f.write(f"Summary: {result['summary']}\n")
+                f.write("-" * 40 + "\n")
         
-        print(f"Report saved to: {report_file}")
+        print(f"  ✓ Exported: {report_file.name}")
     
     def run(self):
         """Main execution flow"""
         try:
-            print("=== Text File Analyzer ===\n")
+            print("=== Smart Text File Analyzer (CSV Export Only) ===\n")
             
-            # Get API key
-            print("Checking API key...")
-            self.get_api_key()
+            # Prompt for API key at startup
+            print("API Key Required...")
+            if not self.prompt_api_key():
+                return
+            
+            print("\n✓ API key accepted\n")
             
             # Select files
             print("Select text/markdown files to analyze...")
@@ -826,40 +556,32 @@ Format as clear text, not JSON."""
             for f in files:
                 print(f"  - {Path(f).name}")
             
-            # Setup database
-            print("\nSetting up database...")
-            self.setup_database()
-            
             # Process each file
+            print("\nStarting intelligent content analysis...")
             for filepath in files:
                 self.process_file(filepath)
             
-            # Find relationships
-            self.find_file_relationships()
-            
             # Export results
-            self.export_results()
-            
-            # Close database
-            self.conn.close()
+            csv_dir = self.export_results()
             
             print("\n✓ Analysis complete!")
-            print(f"Results saved in: {self.output_dir.absolute()}")
-            print("\nExported files:")
-            print(f"  - SQLite database: {self.db_path.name}")
-            print(f"  - Excel workbook: analysis_results_*.xlsx")
-            print(f"  - CSV files: csv_exports/ directory")
-            print(f"  - Summary report: analysis_report_*.txt")
+            print(f"\nResults saved in: {csv_dir.absolute()}")
+            print("\nGenerated CSV files:")
+            print("  - 00_analysis_summary_report.txt - Overview report")
+            print("  - 01_complete_file_analysis.csv - All files with full analysis")
+            print("  - 02_category_summary.csv - Files grouped by category")
+            print("  - 03_theme_analysis.csv - Theme-based organization")
+            print("  - 04_theme_frequency.csv - Most common themes")
+            print("  - 05_content_type_distribution.csv - Content type breakdown")
+            print("  - 06_tag_cloud_data.csv - Tag frequency for visualization")
             
             # Open output directory
-            os.startfile(self.output_dir)
+            os.startfile(csv_dir)
             
         except Exception as e:
             print(f"\n✗ Error: {str(e)}")
             import traceback
             traceback.print_exc()
-            if self.conn:
-                self.conn.close()
 
 if __name__ == "__main__":
     analyzer = TextAnalyzer()
