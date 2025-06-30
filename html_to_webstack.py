@@ -278,7 +278,7 @@ ErrorDocument 404 /404.html
 # Remove .html extension
 RewriteEngine On
 RewriteCond %{REQUEST_FILENAME} !-f
-RewriteRule ^([^\.]+)$ $1.html [NC,L]"""
+RewriteRule ^([^\\.]+)$ $1.html [NC,L]"""
         
         with open(self.output_dir / ".htaccess", 'w') as f:
             f.write(htaccess_content)
