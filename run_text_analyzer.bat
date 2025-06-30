@@ -30,9 +30,12 @@ echo   * Themes and their relationships
 echo   * Keywords and tags (5 per file)
 echo   * Key points and insights
 echo   * Cross-file relationships
-echo - Export results to Excel and text reports
+echo - Export results to:
+echo   * Excel workbook with multiple sheets
+echo   * CSV files for all database tables
+echo   * Text summary report
 echo.
-echo Using Google Gemini Pro 1.5 (1M token context window)
+echo Using Google Gemini 2.5 Pro (Enhanced capabilities)
 echo.
 echo You'll need an OpenRouter API key.
 echo Get one at: https://openrouter.ai/

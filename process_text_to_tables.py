@@ -22,8 +22,8 @@ class TextAnalyzer:
         # OpenRouter API endpoint
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # Use Google's Gemini Pro with 1M token context window
-        self.model = "google/gemini-pro-1.5"
+        # Use Google's Gemini 2.5 Pro with enhanced capabilities
+        self.model = "google/gemini-2.5-pro"
         
         # Chunk size (50,000 characters)
         self.chunk_size = 50000
@@ -45,9 +45,23 @@ class TextAnalyzer:
             root.withdraw()
             
             from tkinter import simpledialog
+            
+            # Create a more detailed dialog
+            message = """Enter your OpenRouter API key:
+
+This script uses Google's Gemini 2.5 Pro model for advanced text analysis.
+
+To get an API key:
+1. Go to https://openrouter.ai/
+2. Sign up for a free account
+3. Generate an API key from your dashboard
+4. Paste it below
+
+Your API key will be saved locally for future use."""
+            
             api_key = simpledialog.askstring(
-                "API Key Required",
-                "Enter your OpenRouter API key:\n(Get one at https://openrouter.ai/)",
+                "OpenRouter API Key Required",
+                message,
                 show='*'
             )
             
@@ -586,6 +600,13 @@ Format as clear text, not JSON."""
         """Export analysis results to various formats"""
         print("\nExporting results...")
         
+        # Create CSV subdirectory
+        csv_dir = self.output_dir / "csv_exports"
+        csv_dir.mkdir(exist_ok=True)
+        
+        # Export all tables to CSV
+        self.export_all_tables_to_csv(csv_dir)
+        
         # Export to Excel
         excel_file = self.output_dir / f"analysis_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
@@ -646,6 +667,101 @@ Format as clear text, not JSON."""
         
         # Also create a summary report
         self.create_summary_report()
+    
+    def export_all_tables_to_csv(self, csv_dir):
+        """Export all database tables to CSV files"""
+        print("Exporting database tables to CSV...")
+        
+        # Get all table names
+        self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in self.cursor.fetchall()]
+        
+        for table in tables:
+            try:
+                # Read table into DataFrame
+                df = pd.read_sql_query(f"SELECT * FROM {table}", self.conn)
+                
+                # Save to CSV
+                csv_file = csv_dir / f"{table}.csv"
+                df.to_csv(csv_file, index=False, encoding='utf-8')
+                print(f"  - Exported {table}.csv ({len(df)} rows)")
+                
+            except Exception as e:
+                print(f"  - Error exporting {table}: {str(e)}")
+        
+        # Also export some custom queries as CSV
+        
+        # Files with all relationships
+        query = '''
+            SELECT f.*, 
+                   GROUP_CONCAT(DISTINCT t.tag_name) as tags,
+                   COUNT(DISTINCT ft.theme_id) as theme_count,
+                   COUNT(DISTINCT fk.keyword_id) as keyword_count
+            FROM files f
+            LEFT JOIN file_tags ftg ON f.file_id = ftg.file_id
+            LEFT JOIN tags t ON ftg.tag_id = t.tag_id
+            LEFT JOIN file_themes ft ON f.file_id = ft.file_id
+            LEFT JOIN file_keywords fk ON f.file_id = fk.file_id
+            GROUP BY f.file_id
+        '''
+        df = pd.read_sql_query(query, self.conn)
+        df.to_csv(csv_dir / "files_with_metadata.csv", index=False)
+        print("  - Exported files_with_metadata.csv")
+        
+        # Theme analysis
+        query = '''
+            SELECT t.theme_name, t.occurrence_count,
+                   COUNT(DISTINCT ft.file_id) as file_count,
+                   AVG(ft.relevance_score) as avg_relevance,
+                   GROUP_CONCAT(DISTINCT f.filename) as files
+            FROM themes t
+            JOIN file_themes ft ON t.theme_id = ft.theme_id
+            JOIN files f ON ft.file_id = f.file_id
+            GROUP BY t.theme_id
+            ORDER BY t.occurrence_count DESC
+        '''
+        df = pd.read_sql_query(query, self.conn)
+        df.to_csv(csv_dir / "theme_analysis.csv", index=False)
+        print("  - Exported theme_analysis.csv")
+        
+        # Keyword analysis
+        query = '''
+            SELECT k.keyword, k.frequency,
+                   COUNT(DISTINCT fk.file_id) as file_count,
+                   GROUP_CONCAT(DISTINCT f.filename) as files
+            FROM keywords k
+            JOIN file_keywords fk ON k.keyword_id = fk.keyword_id
+            JOIN files f ON fk.file_id = f.file_id
+            GROUP BY k.keyword_id
+            ORDER BY k.frequency DESC
+        '''
+        df = pd.read_sql_query(query, self.conn)
+        df.to_csv(csv_dir / "keyword_analysis.csv", index=False)
+        print("  - Exported keyword_analysis.csv")
+        
+        # All summaries
+        query = '''
+            SELECT f.filename, s.summary_type, s.summary_text
+            FROM summaries s
+            JOIN files f ON s.file_id = f.file_id
+            ORDER BY f.filename, s.summary_type
+        '''
+        df = pd.read_sql_query(query, self.conn)
+        df.to_csv(csv_dir / "all_summaries.csv", index=False)
+        print("  - Exported all_summaries.csv")
+        
+        # Key points with scores
+        query = '''
+            SELECT f.filename, kp.point_text, kp.importance_score
+            FROM key_points kp
+            JOIN files f ON kp.file_id = f.file_id
+            ORDER BY f.filename, kp.importance_score DESC
+        '''
+        df = pd.read_sql_query(query, self.conn)
+        df.to_csv(csv_dir / "key_points.csv", index=False)
+        print("  - Exported key_points.csv")
+        
+        print(f"\nAll CSV files exported to: {csv_dir}")
     
     def create_summary_report(self):
         """Create a text summary report"""
@@ -729,6 +845,11 @@ Format as clear text, not JSON."""
             
             print("\n✓ Analysis complete!")
             print(f"Results saved in: {self.output_dir.absolute()}")
+            print("\nExported files:")
+            print(f"  - SQLite database: {self.db_path.name}")
+            print(f"  - Excel workbook: analysis_results_*.xlsx")
+            print(f"  - CSV files: csv_exports/ directory")
+            print(f"  - Summary report: analysis_report_*.txt")
             
             # Open output directory
             os.startfile(self.output_dir)
