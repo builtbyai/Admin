@@ -18,6 +18,9 @@ class VideoScraper:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_dir = Path(f"video_links_{timestamp}")
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.html_dir = self.output_dir / "html_source"
+        self.html_dir.mkdir(parents=True, exist_ok=True)
+        self.file_counter = 0
         
         # Headers to mimic a real browser
         self.headers = {
@@ -109,6 +112,37 @@ class VideoScraper:
             print(f"Sources file not found: {sources_file}")
         
         return urls
+    
+    def clean_filename(self, text):
+        """Clean text to be used as filename"""
+        # Remove or replace invalid filename characters
+        text = re.sub(r'[<>:"/\\|?*]', '_', text)
+        text = re.sub(r'\s+', '_', text)
+        text = text[:100]  # Limit length
+        return text
+    
+    def save_html_source(self, url, html_content, depth):
+        """Save the raw HTML source to a text file"""
+        try:
+            # Generate filename based on URL
+            parsed_url = urlparse(url)
+            domain = parsed_url.netloc.replace('.', '_')
+            path_part = self.clean_filename(parsed_url.path.replace('/', '_'))
+            
+            self.file_counter += 1
+            filename = f"{self.file_counter:04d}_D{depth}_{domain}_{path_part}.html"
+            filepath = self.html_dir / filename
+            
+            # Save HTML content
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"<!-- Source URL: {url} -->\n")
+                f.write(f"<!-- Scraped on: {time.strftime('%Y-%m-%d %H:%M:%S')} -->\n")
+                f.write(f"<!-- Depth: {depth} -->\n\n")
+                f.write(html_content)
+            
+            print(f"{'  ' * depth}Saved HTML source: {filename}")
+        except Exception as e:
+            print(f"{'  ' * depth}Error saving HTML source: {str(e)}")
     
     def extract_video_urls_from_html(self, html_content, base_url):
         """Extract video URLs from HTML content"""
@@ -239,6 +273,9 @@ class VideoScraper:
             
             # Get the content
             content = response.text
+            
+            # Save HTML source
+            self.save_html_source(url, content, depth)
             
             # Extract video URLs from HTML
             video_urls = self.extract_video_urls_from_html(content, url)
@@ -397,6 +434,8 @@ class VideoScraper:
             f.write("Videos by type:\n")
             for vtype, count in sorted(type_counts.items()):
                 f.write(f"  {vtype}: {count}\n")
+            
+            f.write(f"\nHTML source files saved: {self.file_counter}\n")
         
         print(f"\nResults saved to: {self.output_dir.absolute()}")
     

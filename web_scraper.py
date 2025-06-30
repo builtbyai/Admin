@@ -24,6 +24,8 @@ class WebScraper:
         # Create directories
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.media_dir.mkdir(parents=True, exist_ok=True)
+        self.html_dir = self.base_output_dir / "html_source"
+        self.html_dir.mkdir(parents=True, exist_ok=True)
         
         # Headers to mimic a real browser
         self.headers = {
@@ -110,6 +112,29 @@ class WebScraper:
         text = re.sub(r'\s+', '_', text)
         text = text[:100]  # Limit length
         return text
+    
+    def save_html_source(self, url, html_content, depth):
+        """Save the raw HTML source to a text file"""
+        try:
+            # Generate filename based on URL
+            parsed_url = urlparse(url)
+            domain = parsed_url.netloc.replace('.', '_')
+            path_part = self.clean_filename(parsed_url.path.replace('/', '_'))
+            
+            self.file_counter += 1
+            filename = f"{self.file_counter:04d}_D{depth}_{domain}_{path_part}.html"
+            filepath = self.html_dir / filename
+            
+            # Save HTML content
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"<!-- Source URL: {url} -->\n")
+                f.write(f"<!-- Scraped on: {time.strftime('%Y-%m-%d %H:%M:%S')} -->\n")
+                f.write(f"<!-- Depth: {depth} -->\n\n")
+                f.write(html_content)
+            
+            print(f"{'  ' * depth}Saved HTML source: {filename}")
+        except Exception as e:
+            print(f"{'  ' * depth}Error saving HTML source: {str(e)}")
     
     def extract_content(self, soup):
         """Extract main content from the webpage"""
@@ -318,6 +343,9 @@ class WebScraper:
             response = requests.get(url, headers=self.headers, timeout=30)
             response.raise_for_status()
             
+            # Save HTML source
+            self.save_html_source(url, response.text, depth)
+            
             soup = BeautifulSoup(response.content, 'html.parser')
             
             # Get title
@@ -468,6 +496,7 @@ class WebScraper:
         print(f"Output directory: {self.base_output_dir.absolute()}")
         print(f"  Content: {self.output_dir.name}/")
         print(f"  Media: {self.media_dir.name}/")
+        print(f"  HTML Source: {self.html_dir.name}/")
         print("-" * 60)
         
         self.successful = 0
