@@ -13,7 +13,8 @@ import csv
 
 class TextAnalyzer:
     def __init__(self):
-        self.api_key = None
+        # Hardcoded API key for development
+        self.api_key = "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"
         self.selected_files = []
         self.output_dir = Path("text_analysis_output")
         self.output_dir.mkdir(exist_ok=True)
@@ -27,6 +28,9 @@ class TextAnalyzer:
         # Chunk size (50,000 characters)
         self.chunk_size = 50000
         
+        # File truncation size (100,000 characters max per file)
+        self.max_file_size = 100000
+        
         # Storage for analysis results
         self.analysis_results = []
         self.file_summaries = []
@@ -34,35 +38,9 @@ class TextAnalyzer:
         self.categories_data = []
         
     def prompt_api_key(self):
-        """Prompt for API key at startup"""
-        root = tk.Tk()
-        root.withdraw()
-        
-        # Create a more detailed dialog
-        message = """Enter your OpenRouter API key:
-
-This script uses Google's Gemini 2.5 Pro model for advanced text analysis.
-
-To get an API key:
-1. Go to https://openrouter.ai/
-2. Sign up for a free account
-3. Generate an API key from your dashboard
-4. Paste it below
-
-Your API key will be used for this session only."""
-        
-        api_key = simpledialog.askstring(
-            "OpenRouter API Key Required",
-            message,
-            show='*'
-        )
-        
-        if api_key:
-            self.api_key = api_key
-            return True
-        else:
-            print("API key is required to continue.")
-            return False
+        """Skip API key prompt - using hardcoded key for development"""
+        print("Using development API key...")
+        return True
     
     def select_files(self):
         """Open file dialog to select text/markdown files"""
@@ -83,10 +61,13 @@ Your API key will be used for this session only."""
     
     def categorize_content_with_llm(self, file_data):
         """Use LLM to intelligently categorize content"""
+        # Truncate content for analysis
+        content_preview = file_data['content'][:2000] if len(file_data['content']) > 2000 else file_data['content']
+        
         prompt = f"""Analyze this file and provide smart categorization:
 
 Filename: {file_data['filename']}
-Content preview (first 2000 chars): {file_data['content'][:2000]}...
+Content preview: {content_preview}...
 
 Provide a JSON response with:
 1. "category": The main category this content belongs to (e.g., "Technical Documentation", "Business Report", "Research Paper", etc.)
@@ -97,6 +78,7 @@ Provide a JSON response with:
 6. "tags": List of 5 relevant tags
 7. "summary": A 2-3 sentence summary
 8. "key_topics": List of 3-5 key topics covered
+9. "keywords": List of exactly 5 most important keywords or concepts from this content
 
 Format as valid JSON."""
 
@@ -119,7 +101,8 @@ Format as valid JSON."""
             "domain": "General",
             "tags": ["unprocessed"],
             "summary": "Unable to process",
-            "key_topics": []
+            "key_topics": [],
+            "keywords": ["unknown", "unprocessed", "general", "document", "content"]
         }
     
     def chunk_text(self, text, chunk_size=50000):
@@ -262,6 +245,11 @@ Format your response as JSON with these exact keys:
             print(f"Error reading file: {str(e)}")
             return None
         
+        # Truncate file if too large
+        if len(content) > self.max_file_size:
+            print(f"  Truncating file from {len(content)} to {self.max_file_size} characters")
+            content = content[:self.max_file_size]
+        
         filename = Path(filepath).name
         
         # Get intelligent categorization
@@ -304,6 +292,13 @@ Format your response as JSON with these exact keys:
         # Generate overall file summary
         overall_summary = self.generate_file_summary(filename, chunk_summaries)
         
+        # Get the 5 keywords from categorization
+        five_keywords = categorization.get('keywords', [])[:5]
+        if len(five_keywords) < 5:
+            # Fill with top keywords from analysis
+            additional_keywords = [kw for kw in all_keywords if kw not in five_keywords]
+            five_keywords.extend(additional_keywords[:5-len(five_keywords)])
+        
         # Compile results
         file_result = {
             'filename': filename,
@@ -316,9 +311,10 @@ Format your response as JSON with these exact keys:
             'content_type': categorization.get('content_type', 'Document'),
             'domain': categorization.get('domain', 'General'),
             'summary': overall_summary or categorization.get('summary', ''),
+            'five_keywords': ', '.join(five_keywords),  # Exactly 5 keywords
             'tags': ', '.join(list(set(all_tags))[:5]),  # Top 5 unique tags
             'themes': ', '.join(list(set(all_themes))[:10]),  # Top 10 themes
-            'keywords': ', '.join(list(set(all_keywords))[:20]),  # Top 20 keywords
+            'all_keywords': ', '.join(list(set(all_keywords))[:20]),  # Top 20 keywords
             'key_points': ' | '.join(all_key_points[:5]),  # Top 5 key points
             'processed_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
@@ -477,15 +473,34 @@ Format as clear text, not JSON."""
         # Create a summary report
         self.create_summary_report(csv_dir, tables)
         
+        # Create keywords and summaries file
+        self.create_keywords_summary_file(csv_dir)
+        
         print(f"\n✓ All CSV files exported to: {csv_dir}")
         return csv_dir
+    
+    def create_keywords_summary_file(self, csv_dir):
+        """Create a dedicated file with titles, keywords, and summaries"""
+        keywords_file = csv_dir / "keywords_and_summaries.txt"
+        
+        with open(keywords_file, 'w', encoding='utf-8') as f:
+            f.write("FILE KEYWORDS AND SUMMARIES\n")
+            f.write("=" * 80 + "\n\n")
+            
+            for result in self.analysis_results:
+                f.write(f"TITLE: {result['filename']}\n")
+                f.write(f"5 KEYWORDS: {result['five_keywords']}\n")
+                f.write(f"EXPANDED SUMMARY: {result['summary']}\n")
+                f.write("\n" + "-" * 80 + "\n\n")
+        
+        print(f"  ✓ Exported: keywords_and_summaries.txt")
     
     def create_summary_report(self, csv_dir, tables):
         """Create a text summary report"""
         report_file = csv_dir / "00_analysis_summary_report.txt"
         
         with open(report_file, 'w', encoding='utf-8') as f:
-            f.write("TEXT ANALYSIS SUMMARY REPORT\n")
+            f.write("TEXT ANALYSIS SUMMARY REPORT WITH KEYWORDS\n")
             f.write("=" * 60 + "\n\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"Output Directory: {csv_dir.name}\n\n")
@@ -520,15 +535,16 @@ Format as clear text, not JSON."""
                     f.write(f"  - {ctype}: {count} files\n")
                 f.write("\n")
             
-            # File summaries
-            f.write("\nFILE SUMMARIES:\n")
-            f.write("-" * 40 + "\n")
-            for result in self.analysis_results[:10]:  # First 10 files
-                f.write(f"\n{result['filename']}:\n")
+            # File summaries with keywords
+            f.write("\nFILE SUMMARIES WITH KEYWORDS:\n")
+            f.write("-" * 60 + "\n")
+            for result in self.analysis_results:
+                f.write(f"\nFILE: {result['filename']}\n")
+                f.write(f"KEYWORDS: {result['five_keywords']}\n")
                 f.write(f"Category: {result['category']} > {result['subcategory']}\n")
                 f.write(f"Tags: {result['tags']}\n")
                 f.write(f"Summary: {result['summary']}\n")
-                f.write("-" * 40 + "\n")
+                f.write("-" * 60 + "\n")
         
         print(f"  ✓ Exported: {report_file.name}")
     
@@ -566,9 +582,9 @@ Format as clear text, not JSON."""
             
             print("\n✓ Analysis complete!")
             print(f"\nResults saved in: {csv_dir.absolute()}")
-            print("\nGenerated CSV files:")
-            print("  - 00_analysis_summary_report.txt - Overview report")
-            print("  - 01_complete_file_analysis.csv - All files with full analysis")
+            print("\nGenerated files:")
+            print("  - 00_analysis_summary_report.txt - Text report with 5 keywords per file")
+            print("  - 01_complete_file_analysis.csv - All files with full analysis and keywords")
             print("  - 02_category_summary.csv - Files grouped by category")
             print("  - 03_theme_analysis.csv - Theme-based organization")
             print("  - 04_theme_frequency.csv - Most common themes")
