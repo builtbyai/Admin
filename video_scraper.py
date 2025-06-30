@@ -27,13 +27,24 @@ class VideoScraper:
         # Video extensions to search for
         self.video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.m3u8', '.webm', '.mpg', '.mpeg'}
         
-        # Common video URL patterns
+        # Common video URL patterns - expanded for better detection
         self.video_patterns = [
-            r'https?://[^\s<>"{}|\\^`\[\]]+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)',
+            # Direct video file URLs
+            r'https?://[^\s<>"{}|\\^`\[\]]+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm|mpg|mpeg|3gp|ogv)',
+            # Video URLs with query parameters
+            r'https?://[^\s<>"{}|\\^`\[\]]+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)\?[^\s<>"{}|\\^`\[\]]*',
+            # Common video paths
             r'https?://[^\s<>"{}|\\^`\[\]]+/video/[^\s<>"{}|\\^`\[\]]+',
             r'https?://[^\s<>"{}|\\^`\[\]]+/stream/[^\s<>"{}|\\^`\[\]]+',
+            r'https?://[^\s<>"{}|\\^`\[\]]+/media/[^\s<>"{}|\\^`\[\]]+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)',
+            r'https?://[^\s<>"{}|\\^`\[\]]+/content/[^\s<>"{}|\\^`\[\]]+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)',
+            # M3U8 streaming
             r'https?://[^\s<>"{}|\\^`\[\]]+\.m3u8[^\s<>"{}|\\^`\[\]]*',
+            # Blob URLs
             r'blob:https?://[^\s<>"{}|\\^`\[\]]+',
+            # CDN patterns
+            r'https?://[^\s<>"{}|\\^`\[\]]+\.cloudfront\.net/[^\s<>"{}|\\^`\[\]]+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)',
+            r'https?://[^\s<>"{}|\\^`\[\]]+\.amazonaws\.com/[^\s<>"{}|\\^`\[\]]+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)',
         ]
     
     def get_user_urls(self):
@@ -108,20 +119,22 @@ class VideoScraper:
         
         # Look for video tags
         for video in soup.find_all(['video', 'source']):
-            src = video.get('src') or video.get('data-src')
-            if src:
-                video_urls.add(urljoin(base_url, src))
+            # Check multiple attributes
+            for attr in ['src', 'data-src', 'data-source', 'data-video-src']:
+                src = video.get(attr)
+                if src:
+                    video_urls.add(urljoin(base_url, src))
         
         # Look for links to video files
         for link in soup.find_all('a', href=True):
             href = link['href']
-            if any(href.lower().endswith(ext) for ext in self.video_extensions):
+            if any(ext in href.lower() for ext in self.video_extensions):
                 video_urls.add(urljoin(base_url, href))
         
         # Look for iframes (might contain video players)
         for iframe in soup.find_all('iframe'):
             src = iframe.get('src')
-            if src and any(provider in src.lower() for provider in ['youtube', 'vimeo', 'dailymotion', 'video']):
+            if src and any(provider in src.lower() for provider in ['youtube', 'vimeo', 'dailymotion', 'video', 'player', 'embed']):
                 video_urls.add(urljoin(base_url, src))
         
         # Search in JavaScript content
@@ -133,15 +146,41 @@ class VideoScraper:
                     matches = re.findall(pattern, script.string, re.IGNORECASE)
                     for match in matches:
                         video_urls.add(match)
+                
+                # Look for JSON objects containing video URLs
+                json_pattern = r'\{[^{}]*"(?:url|src|source|video|file|stream)"[^{}]*:[^{}]*"([^"]+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)[^"]*)"[^{}]*\}'
+                json_matches = re.findall(json_pattern, script.string, re.IGNORECASE)
+                for match in json_matches:
+                    video_urls.add(urljoin(base_url, match))
         
-        # Search in data attributes
-        for element in soup.find_all(attrs={'data-video-url': True}):
-            video_urls.add(urljoin(base_url, element['data-video-url']))
+        # Search in all data attributes
+        for element in soup.find_all(True):  # All elements
+            for attr, value in element.attrs.items():
+                if isinstance(value, str):
+                    # Check if attribute name suggests video
+                    if any(keyword in attr.lower() for keyword in ['video', 'media', 'src', 'source', 'file', 'url']):
+                        if any(ext in value.lower() for ext in self.video_extensions):
+                            video_urls.add(urljoin(base_url, value))
+                    
+                    # Also check attribute values for video URLs
+                    for pattern in self.video_patterns:
+                        matches = re.findall(pattern, value, re.IGNORECASE)
+                        for match in matches:
+                            video_urls.add(match)
         
-        for element in soup.find_all(attrs={'data-src': True}):
-            data_src = element['data-src']
-            if any(ext in data_src.lower() for ext in self.video_extensions):
-                video_urls.add(urljoin(base_url, data_src))
+        # Look for meta tags with video content
+        for meta in soup.find_all('meta'):
+            content = meta.get('content', '')
+            if any(ext in content.lower() for ext in self.video_extensions):
+                video_urls.add(urljoin(base_url, content))
+        
+        # Search in style attributes for background videos
+        for element in soup.find_all(style=True):
+            style = element['style']
+            for pattern in self.video_patterns:
+                matches = re.findall(pattern, style, re.IGNORECASE)
+                for match in matches:
+                    video_urls.add(match)
         
         return video_urls
     
@@ -154,12 +193,34 @@ class VideoScraper:
             matches = re.findall(pattern, text, re.IGNORECASE)
             video_urls.update(matches)
         
+        # Look for URLs in quotes (single or double)
+        quoted_url_pattern = r'["\']([^"\']+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)[^"\']*)["\']'
+        quoted_matches = re.findall(quoted_url_pattern, text, re.IGNORECASE)
+        video_urls.update(quoted_matches)
+        
+        # Look for URLs in JSON-style strings
+        json_url_pattern = r'["\']\s*:\s*["\']([^"\']+\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)[^"\']*)["\']'
+        json_matches = re.findall(json_url_pattern, text, re.IGNORECASE)
+        video_urls.update(json_matches)
+        
+        # Look for base64 encoded URLs (sometimes used for video sources)
+        base64_pattern = r'data:video/[^;]+;base64,[A-Za-z0-9+/=]+'
+        base64_matches = re.findall(base64_pattern, text)
+        video_urls.update(base64_matches)
+        
         # Also look for any URL ending with video extensions
         url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
         all_urls = re.findall(url_pattern, text)
         for url in all_urls:
             if any(ext in url.lower() for ext in self.video_extensions):
                 video_urls.add(url)
+        
+        # Look for relative paths to video files
+        relative_pattern = r'["\']([^"\']*\.(?:mp4|mov|avi|mkv|wmv|flv|m3u8|webm)[^"\']*)["\']'
+        relative_matches = re.findall(relative_pattern, text, re.IGNORECASE)
+        for match in relative_matches:
+            if not match.startswith(('http://', 'https://', 'data:')):
+                video_urls.add(match)  # Will be converted to absolute URL later
         
         return video_urls
     
@@ -182,9 +243,31 @@ class VideoScraper:
             # Extract video URLs from HTML
             video_urls = self.extract_video_urls_from_html(content, url)
             
-            # Also extract from raw text
+            # Also extract from raw text (catches things BeautifulSoup might miss)
             text_videos = self.extract_video_urls_from_text(content)
             video_urls.update(text_videos)
+            
+            # Clean and validate URLs
+            cleaned_urls = set()
+            for video_url in video_urls:
+                # Skip data URLs and blob URLs for now
+                if video_url.startswith(('data:', 'blob:')):
+                    cleaned_urls.add(video_url)
+                    continue
+                
+                # Convert relative URLs to absolute
+                if not video_url.startswith(('http://', 'https://')):
+                    video_url = urljoin(url, video_url)
+                
+                # Validate URL
+                try:
+                    parsed = urlparse(video_url)
+                    if parsed.scheme in ['http', 'https']:
+                        cleaned_urls.add(video_url)
+                except:
+                    pass
+            
+            video_urls = cleaned_urls
             
             # Parse page for more links to follow
             soup = BeautifulSoup(content, 'html.parser')
@@ -198,14 +281,31 @@ class VideoScraper:
             
             # Store found videos
             for video_url in video_urls:
-                video_info = {
-                    'url': video_url,
-                    'found_on': url,
-                    'depth': depth,
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                self.found_videos.append(video_info)
-                print(f"{'  ' * (depth + 1)}Found video: {video_url}")
+                # Check if we've already found this video
+                if not any(v['url'] == video_url for v in self.found_videos):
+                    # Determine video type
+                    video_type = 'unknown'
+                    if video_url.startswith('data:'):
+                        video_type = 'base64'
+                    elif video_url.startswith('blob:'):
+                        video_type = 'blob'
+                    elif '.m3u8' in video_url.lower():
+                        video_type = 'streaming'
+                    else:
+                        for ext in self.video_extensions:
+                            if ext in video_url.lower():
+                                video_type = ext[1:]  # Remove the dot
+                                break
+                    
+                    video_info = {
+                        'url': video_url,
+                        'found_on': url,
+                        'depth': depth,
+                        'type': video_type,
+                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    self.found_videos.append(video_info)
+                    print(f"{'  ' * (depth + 1)}Found {video_type} video: {video_url[:100]}...")
             
             return {
                 'url': url,
@@ -276,9 +376,27 @@ class VideoScraper:
         # Save as CSV
         csv_file = self.output_dir / 'video_links.csv'
         with open(csv_file, 'w', encoding='utf-8') as f:
-            f.write("Video URL,Found On,Depth,Timestamp\n")
+            f.write("Video URL,Found On,Type,Depth,Timestamp\n")
             for video in self.found_videos:
-                f.write(f'"{video["url"]}","{video["found_on"]}",{video["depth"]},{video["timestamp"]}\n')
+                f.write(f'"{video["url"]}","{video["found_on"]}",{video.get("type", "unknown")},{video["depth"]},{video["timestamp"]}\n')
+        
+        # Save summary
+        summary_file = self.output_dir / 'summary.txt'
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            f.write(f"Video Scraping Summary - {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("=" * 60 + "\n\n")
+            f.write(f"Total videos found: {len(self.found_videos)}\n")
+            f.write(f"URLs scanned: {len(self.visited_urls)}\n\n")
+            
+            # Count by type
+            type_counts = {}
+            for video in self.found_videos:
+                vtype = video.get('type', 'unknown')
+                type_counts[vtype] = type_counts.get(vtype, 0) + 1
+            
+            f.write("Videos by type:\n")
+            for vtype, count in sorted(type_counts.items()):
+                f.write(f"  {vtype}: {count}\n")
         
         print(f"\nResults saved to: {self.output_dir.absolute()}")
     
