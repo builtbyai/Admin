@@ -133,6 +133,8 @@ class MediaFileRenamer:
                         i += 1
                     if i < len(lines) and current_original:
                         new_name = lines[i].strip().strip('"\'')
+                        # Store both original case and lowercase versions
+                        self.rename_mappings[current_original] = new_name
                         self.rename_mappings[current_original.lower()] = new_name
                         current_original = None
                 elif line and not line.startswith('#'):
@@ -143,6 +145,8 @@ class MediaFileRenamer:
                             # Treat as original -> new mapping
                             original = line.strip('"\'')
                             new_name = next_line.strip('"\'')
+                            # Store both original case and lowercase versions
+                            self.rename_mappings[original] = new_name
                             self.rename_mappings[original.lower()] = new_name
                             i += 1  # Skip the next line since we used it
                             
@@ -186,13 +190,32 @@ class MediaFileRenamer:
         
         folder = self.selected_text_file.parent
         
+        # Debug: show what we're looking for
+        print(f"Scanning folder: {folder}")
+        print(f"Looking for {len(self.rename_mappings)} mappings")
+        
+        files_found = []
+        files_matched = []
+        
         for file_path in folder.iterdir():
             if file_path.is_file() and file_path.suffix.lower() in media_extensions:
-                # Check if this file has a rename mapping
-                file_name_lower = file_path.name.lower()
+                files_found.append(file_path.name)
                 
-                if file_name_lower in self.rename_mappings:
-                    new_name = self.rename_mappings[file_name_lower]
+                # Check if this file has a rename mapping
+                # Try exact match first, then lowercase
+                if file_path.name in self.rename_mappings:
+                    new_name = self.rename_mappings[file_path.name]
+                elif file_path.name.lower() in self.rename_mappings:
+                    new_name = self.rename_mappings[file_path.name.lower()]
+                else:
+                    # Try without extension
+                    stem_lower = file_path.stem.lower()
+                    if stem_lower in self.rename_mappings:
+                        new_name = self.rename_mappings[stem_lower]
+                    else:
+                        continue
+                
+                files_matched.append(file_path.name)
                     
                     # Preserve the original extension if new name doesn't have one
                     if '.' not in new_name:
@@ -220,8 +243,19 @@ class MediaFileRenamer:
                                           values=(file_path.name, new_name, file_type))
                     self.files_to_process.append((file_path, new_path, item))
                     
+        # Debug output
         if not self.files_to_process:
-            messagebox.showinfo("No Matches", "No media files found matching the rename instructions")
+            debug_msg = f"No media files found matching the rename instructions.\n\n"
+            debug_msg += f"Media files found in folder: {len(files_found)}\n"
+            if files_found:
+                debug_msg += f"First few files: {', '.join(files_found[:5])}\n\n"
+            debug_msg += f"Rename mappings loaded: {len(self.rename_mappings)}\n"
+            if self.rename_mappings:
+                debug_msg += f"First few mappings:\n"
+                for old, new in list(self.rename_mappings.items())[:3]:
+                    debug_msg += f"  '{old}' → '{new}'\n"
+            
+            messagebox.showinfo("No Matches", debug_msg)
         else:
             messagebox.showinfo("Scan Complete", f"Found {len(self.files_to_process)} media files to rename")
         
