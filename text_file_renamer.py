@@ -216,32 +216,32 @@ class MediaFileRenamer:
                         continue
                 
                 files_matched.append(file_path.name)
-                    
-                    # Preserve the original extension if new name doesn't have one
-                    if '.' not in new_name:
-                        new_name = new_name + file_path.suffix
-                    
-                    new_path = file_path.parent / new_name
-                    
-                    # Check if new name already exists
-                    if new_path.exists() and new_path != file_path:
-                        # Add number to make unique
-                        base_name = new_path.stem
-                        extension = new_path.suffix
-                        counter = 1
-                        while new_path.exists():
-                            new_name = f"{base_name}_{counter}{extension}"
-                            new_path = file_path.parent / new_name
-                            counter += 1
-                    
-                    # Determine file type
-                    file_type = "Image" if file_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'] else \
-                               "Video" if file_path.suffix.lower() in ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'] else "Audio"
-                    
-                    # Add to tree
-                    item = self.tree.insert("", "end", text="Ready", 
-                                          values=(file_path.name, new_name, file_type))
-                    self.files_to_process.append((file_path, new_path, item))
+                
+                # Preserve the original extension if new name doesn't have one
+                if '.' not in new_name:
+                    new_name = new_name + file_path.suffix
+                
+                new_path = file_path.parent / new_name
+                
+                # Check if new name already exists
+                if new_path.exists() and new_path != file_path:
+                    # Add number to make unique
+                    base_name = new_path.stem
+                    extension = new_path.suffix
+                    counter = 1
+                    while new_path.exists():
+                        new_name = f"{base_name}_{counter}{extension}"
+                        new_path = file_path.parent / new_name
+                        counter += 1
+                
+                # Determine file type
+                file_type = "Image" if file_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'] else \
+                           "Video" if file_path.suffix.lower() in ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'] else "Audio"
+                
+                # Add to tree
+                item = self.tree.insert("", "end", text="Ready", 
+                                      values=(file_path.name, new_name, file_type))
+                self.files_to_process.append((file_path, new_path, item))
                     
         # Debug output
         if not self.files_to_process:
