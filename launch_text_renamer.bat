@@ -1,5 +1,5 @@
 @echo off
-echo Starting Text File Renamer...
+echo Starting Media File Renamer...
 echo.
 
 REM Check if Python is installed

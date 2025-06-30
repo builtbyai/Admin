@@ -5,13 +5,14 @@ from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 import threading
 
-class TextFileRenamer:
+class MediaFileRenamer:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Text File Renamer")
-        self.root.geometry("800x600")
+        self.root.title("Media File Renamer")
+        self.root.geometry("900x700")
         
-        self.selected_folder = None
+        self.selected_text_file = None
+        self.rename_mappings = {}
         self.files_to_process = []
         
         self.create_interface()
@@ -21,38 +22,36 @@ class TextFileRenamer:
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # Folder selection
-        ttk.Label(main_frame, text="Select Folder:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.folder_label = ttk.Label(main_frame, text="No folder selected", relief="sunken")
-        self.folder_label.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=10)
-        ttk.Button(main_frame, text="Browse", command=self.select_folder).grid(row=0, column=2)
+        # Text file selection
+        ttk.Label(main_frame, text="Select Text File with Rename Instructions:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.file_label = ttk.Label(main_frame, text="No file selected", relief="sunken")
+        self.file_label.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=10)
+        ttk.Button(main_frame, text="Browse", command=self.select_text_file).grid(row=0, column=2)
         
-        # Options frame
-        options_frame = ttk.LabelFrame(main_frame, text="Renaming Options", padding="10")
-        options_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        # Info frame
+        info_frame = ttk.LabelFrame(main_frame, text="File Information", padding="10")
+        info_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
         
-        self.max_length_var = tk.IntVar(value=50)
-        ttk.Label(options_frame, text="Max filename length:").grid(row=0, column=0, sticky=tk.W)
-        ttk.Spinbox(options_frame, from_=20, to=100, textvariable=self.max_length_var, width=10).grid(row=0, column=1, sticky=tk.W)
-        
-        self.include_date_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(options_frame, text="Include date in filename", variable=self.include_date_var).grid(row=1, column=0, columnspan=2, sticky=tk.W)
-        
-        self.preview_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Preview changes before renaming", variable=self.preview_var).grid(row=2, column=0, columnspan=2, sticky=tk.W)
+        self.info_text = tk.Text(info_frame, height=5, width=80, wrap=tk.WORD)
+        self.info_text.grid(row=0, column=0, sticky=(tk.W, tk.E))
+        info_scrollbar = ttk.Scrollbar(info_frame, orient="vertical", command=self.info_text.yview)
+        info_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.info_text.configure(yscrollcommand=info_scrollbar.set)
         
         # File list frame
-        list_frame = ttk.LabelFrame(main_frame, text="Files to Process", padding="10")
+        list_frame = ttk.LabelFrame(main_frame, text="Media Files to Rename", padding="10")
         list_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
         
         # Create treeview for file list
-        self.tree = ttk.Treeview(list_frame, columns=("current", "new"), show="tree headings", height=15)
+        self.tree = ttk.Treeview(list_frame, columns=("current", "new", "type"), show="tree headings", height=20)
         self.tree.heading("#0", text="Status")
-        self.tree.heading("current", text="Current Name")
-        self.tree.heading("new", text="New Name")
+        self.tree.heading("current", text="Original File Name")
+        self.tree.heading("new", text="New File Name")
+        self.tree.heading("type", text="Type")
         self.tree.column("#0", width=100)
-        self.tree.column("current", width=300)
-        self.tree.column("new", width=300)
+        self.tree.column("current", width=350)
+        self.tree.column("new", width=350)
+        self.tree.column("type", width=80)
         
         # Scrollbar for treeview
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
@@ -65,9 +64,10 @@ class TextFileRenamer:
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=3, column=0, columnspan=3, pady=10)
         
-        ttk.Button(button_frame, text="Scan Files", command=self.scan_files).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Load Instructions", command=self.load_instructions).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Scan Media Files", command=self.scan_media_files).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Rename Files", command=self.rename_files).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Clear", command=self.clear_list).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Clear", command=self.clear_all).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Exit", command=self.root.quit).pack(side=tk.LEFT, padx=5)
         
         # Configure grid weights
@@ -78,135 +78,153 @@ class TextFileRenamer:
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
         
-    def select_folder(self):
-        folder = filedialog.askdirectory(title="Select folder containing text files")
-        if folder:
-            self.selected_folder = Path(folder)
-            self.folder_label.config(text=str(self.selected_folder))
-            self.clear_list()
+    def select_text_file(self):
+        file_path = filedialog.askopenfilename(
+            title="Select text file with rename instructions",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        if file_path:
+            self.selected_text_file = Path(file_path)
+            self.file_label.config(text=str(self.selected_text_file))
+            self.clear_all()
+            self.info_text.delete(1.0, tk.END)
+            self.info_text.insert(1.0, f"Selected: {self.selected_text_file.name}\nFolder: {self.selected_text_file.parent}")
             
-    def clear_list(self):
+    def clear_all(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
         self.files_to_process = []
+        self.rename_mappings = {}
         
-    def extract_title_from_content(self, file_path):
-        """Extract a suitable title from the text file content"""
+    def load_instructions(self):
+        """Load rename instructions from the selected text file"""
+        if not self.selected_text_file:
+            messagebox.showwarning("No File", "Please select a text file first")
+            return
+            
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(self.selected_text_file, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
                 
-            # Clean the content
-            content = content.strip()
-            if not content:
-                return None
-                
-            # Try to find a title-like line
-            lines = content.split('\n')
+            self.rename_mappings = {}
+            lines = content.strip().split('\n')
             
-            # Look for common title patterns
-            for line in lines[:10]:  # Check first 10 lines
-                line = line.strip()
-                if not line:
-                    continue
+            # Parse the file looking for "Original file name" and "New file name" patterns
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+                
+                # Look for "Original file name" header or just a filename
+                if i + 1 < len(lines):
+                    original = line
+                    new_name = lines[i + 1].strip()
                     
-                # Check if line looks like a title
-                if (len(line) > 5 and len(line) < 100 and
-                    not line.endswith('.') and
-                    not line.endswith(',') and
-                    line[0].isupper()):
-                    return self.clean_filename(line)
-                    
-            # If no title found, use first meaningful line
-            for line in lines:
-                line = line.strip()
-                if len(line) > 10:
-                    return self.clean_filename(line)
-                    
-            # Last resort: use first few words
-            words = content.split()[:10]
-            if words:
-                return self.clean_filename(' '.join(words))
+                    # Skip if lines look like headers
+                    if 'original' in original.lower() and 'file' in original.lower():
+                        i += 1
+                        continue
+                    if 'new' in new_name.lower() and 'file' in new_name.lower():
+                        i += 1
+                        continue
+                        
+                    # If both lines look like filenames, treat as a mapping
+                    if original and new_name and not original.startswith('#'):
+                        # Remove any quotes
+                        original = original.strip('"\'')
+                        new_name = new_name.strip('"\'')
+                        self.rename_mappings[original.lower()] = new_name
+                        i += 2
+                        continue
+                        
+                i += 1
+                
+            # Update info display
+            self.info_text.delete(1.0, tk.END)
+            info = f"Loaded {len(self.rename_mappings)} rename instructions from {self.selected_text_file.name}\n\n"
+            info += "Mappings found:\n"
+            for old, new in list(self.rename_mappings.items())[:10]:  # Show first 10
+                info += f"  {old} → {new}\n"
+            if len(self.rename_mappings) > 10:
+                info += f"  ... and {len(self.rename_mappings) - 10} more"
+                
+            self.info_text.insert(1.0, info)
+            
+            if not self.rename_mappings:
+                messagebox.showwarning("No Mappings", "No rename mappings found in the file.\n\nExpected format:\noriginal_filename.jpg\nnew_filename.jpg")
                 
         except Exception as e:
-            print(f"Error reading {file_path}: {e}")
+            messagebox.showerror("Error", f"Error reading file: {e}")
+        
+    def scan_media_files(self):
+        """Scan for media files in the same folder as the text file"""
+        if not self.selected_text_file:
+            messagebox.showwarning("No File", "Please select a text file first")
+            return
             
-        return None
-        
-    def clean_filename(self, text):
-        """Clean text to make it suitable as a filename"""
-        # Remove invalid filename characters
-        text = re.sub(r'[<>:"/\\|?*]', '', text)
-        
-        # Replace multiple spaces with single space
-        text = re.sub(r'\s+', ' ', text)
-        
-        # Remove leading/trailing spaces and dots
-        text = text.strip(' .')
-        
-        # Limit length
-        max_length = self.max_length_var.get()
-        if len(text) > max_length:
-            text = text[:max_length].rsplit(' ', 1)[0]  # Cut at word boundary
-            
-        # Ensure filename is not empty
-        if not text:
-            text = "untitled"
-            
-        return text
-        
-    def scan_files(self):
-        if not self.selected_folder:
-            messagebox.showwarning("No Folder", "Please select a folder first")
+        if not self.rename_mappings:
+            messagebox.showwarning("No Instructions", "Please load instructions first")
             return
             
         self.clear_list()
         
-        # Find all text files
-        text_extensions = ['.txt', '.text', '.md', '.log']
+        # Media file extensions
+        media_extensions = [
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp',  # Images
+            '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm',  # Videos
+            '.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a'   # Audio
+        ]
         
-        for file_path in self.selected_folder.iterdir():
-            if file_path.is_file() and file_path.suffix.lower() in text_extensions:
-                new_name = self.extract_title_from_content(file_path)
+        folder = self.selected_text_file.parent
+        
+        for file_path in folder.iterdir():
+            if file_path.is_file() and file_path.suffix.lower() in media_extensions:
+                # Check if this file has a rename mapping
+                file_name_lower = file_path.name.lower()
                 
-                if new_name and new_name != file_path.stem:
-                    # Add date if requested
-                    if self.include_date_var.get():
-                        from datetime import datetime
-                        date_str = datetime.now().strftime("%Y%m%d_")
-                        new_name = date_str + new_name
-                        
-                    # Keep original extension
-                    new_filename = new_name + file_path.suffix
+                if file_name_lower in self.rename_mappings:
+                    new_name = self.rename_mappings[file_name_lower]
+                    
+                    # Preserve the original extension if new name doesn't have one
+                    if '.' not in new_name:
+                        new_name = new_name + file_path.suffix
+                    
+                    new_path = file_path.parent / new_name
                     
                     # Check if new name already exists
-                    new_path = file_path.parent / new_filename
-                    if new_path.exists():
+                    if new_path.exists() and new_path != file_path:
                         # Add number to make unique
+                        base_name = new_path.stem
+                        extension = new_path.suffix
                         counter = 1
                         while new_path.exists():
-                            new_filename = f"{new_name}_{counter}{file_path.suffix}"
-                            new_path = file_path.parent / new_filename
+                            new_name = f"{base_name}_{counter}{extension}"
+                            new_path = file_path.parent / new_name
                             counter += 1
-                            
+                    
+                    # Determine file type
+                    file_type = "Image" if file_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'] else \
+                               "Video" if file_path.suffix.lower() in ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'] else "Audio"
+                    
                     # Add to tree
                     item = self.tree.insert("", "end", text="Ready", 
-                                          values=(file_path.name, new_filename))
+                                          values=(file_path.name, new_name, file_type))
                     self.files_to_process.append((file_path, new_path, item))
                     
         if not self.files_to_process:
-            messagebox.showinfo("No Changes", "No files need renaming or no text files found")
+            messagebox.showinfo("No Matches", "No media files found matching the rename instructions")
+        else:
+            messagebox.showinfo("Scan Complete", f"Found {len(self.files_to_process)} media files to rename")
+        
             
     def rename_files(self):
         if not self.files_to_process:
-            messagebox.showwarning("No Files", "Please scan files first")
+            messagebox.showwarning("No Files", "Please scan media files first")
             return
             
-        if self.preview_var.get():
-            response = messagebox.askyesno("Confirm Rename", 
-                                         f"Rename {len(self.files_to_process)} files?")
-            if not response:
-                return
+        response = messagebox.askyesno("Confirm Rename", 
+                                     f"Rename {len(self.files_to_process)} media files?")
+        if not response:
+            return
                 
         success_count = 0
         error_count = 0
@@ -231,5 +249,5 @@ class TextFileRenamer:
         self.root.mainloop()
 
 if __name__ == "__main__":
-    app = TextFileRenamer()
+    app = MediaFileRenamer()
     app.run()
