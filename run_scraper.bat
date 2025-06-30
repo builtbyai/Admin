@@ -13,7 +13,7 @@ if errorlevel 1 (
 
 REM Install required packages
 echo Installing required packages...
-pip install requests beautifulsoup4
+pip install requests beautifulsoup4 urllib3
 
 echo.
 echo Running web scraper...

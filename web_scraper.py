@@ -7,10 +7,13 @@ import time
 from pathlib import Path
 
 class WebScraper:
-    def __init__(self, sources_file="E:\\Users\\Admin\\OneDrive\\Desktop\\Sources.txt"):
+    def __init__(self, sources_file="E:\\Users\\Admin\\OneDrive\\Desktop\\Sources.txt", max_depth=2):
         self.sources_file = sources_file
         self.output_dir = Path("scraped_content")
         self.output_dir.mkdir(exist_ok=True)
+        self.max_depth = max_depth
+        self.visited_urls = set()
+        self.file_counter = 0
         
         # Headers to mimic a real browser
         self.headers = {
@@ -144,11 +147,36 @@ class WebScraper:
         
         return markdown
     
-    def scrape_url(self, url):
-        """Scrape a single URL and return content"""
+    def extract_links(self, soup, base_url):
+        """Extract all links from the page"""
+        links = set()
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            # Convert relative URLs to absolute
+            absolute_url = urljoin(base_url, href)
+            
+            # Parse the URL
+            parsed = urlparse(absolute_url)
+            
+            # Filter out non-HTTP(S) links and anchors
+            if parsed.scheme in ['http', 'https'] and parsed.netloc:
+                # Remove fragment (anchor) from URL
+                clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                if parsed.query:
+                    clean_url += f"?{parsed.query}"
+                links.add(clean_url)
+        
+        return links
+    
+    def scrape_url(self, url, depth=0):
+        """Scrape a single URL and return content with links"""
         try:
             # Clean up the URL
             url = url.strip()
+            
+            # Skip if already visited
+            if url in self.visited_urls:
+                return None
             
             # Validate URL format
             parsed = urlparse(url)
@@ -158,10 +186,13 @@ class WebScraper:
                     'title': 'Invalid URL',
                     'url': url,
                     'content': f"Invalid URL format: {url}",
+                    'links': [],
                     'success': False
                 }
             
-            print(f"Scraping: {url}")
+            print(f"{'  ' * depth}Scraping: {url}")
+            self.visited_urls.add(url)
+            
             response = requests.get(url, headers=self.headers, timeout=30)
             response.raise_for_status()
             
@@ -170,6 +201,9 @@ class WebScraper:
             # Get title
             title = soup.find('title')
             title_text = title.get_text().strip() if title else urlparse(url).netloc
+            
+            # Extract all links from the page
+            links = self.extract_links(soup, url)
             
             # Extract main content
             content = self.extract_content(soup)
@@ -181,11 +215,13 @@ class WebScraper:
                 'title': title_text,
                 'url': url,
                 'content': markdown_content,
-                'success': True
+                'links': list(links),
+                'success': True,
+                'depth': depth
             }
             
         except Exception as e:
-            print(f"Error scraping {url}: {str(e)}")
+            print(f"{'  ' * depth}Error scraping {url}: {str(e)}")
             try:
                 title = urlparse(url).netloc
             except:
@@ -194,23 +230,40 @@ class WebScraper:
                 'title': title,
                 'url': url,
                 'content': f"Error scraping content: {str(e)}",
-                'success': False
+                'links': [],
+                'success': False,
+                'depth': depth
             }
     
-    def save_markdown(self, data, index):
+    def save_markdown(self, data):
         """Save scraped data as markdown file"""
-        filename = f"{index:03d}_{self.clean_filename(data['title'])}.md"
+        self.file_counter += 1
+        depth_prefix = f"D{data.get('depth', 0)}_"
+        filename = f"{self.file_counter:04d}_{depth_prefix}{self.clean_filename(data['title'])}.md"
         filepath = self.output_dir / filename
+        
+        # Format links section
+        links_section = ""
+        if data.get('links'):
+            links_section = f"\n## Links Found ({len(data['links'])} total)\n\n"
+            for link in data['links'][:50]:  # Limit to first 50 links
+                links_section += f"- {link}\n"
+            if len(data['links']) > 50:
+                links_section += f"\n... and {len(data['links']) - 50} more links\n"
         
         markdown_content = f"""# {data['title']}
 
 **Source URL:** {data['url']}
 **Scraped on:** {time.strftime('%Y-%m-%d %H:%M:%S')}
 **Status:** {'Success' if data['success'] else 'Error'}
+**Depth:** {data.get('depth', 0)}
 
 ---
 
 {data['content']}
+
+---
+{links_section}
 """
         
         try:
@@ -222,6 +275,40 @@ class WebScraper:
             print(f"Error saving {filepath}: {str(e)}")
             return False
     
+    def scrape_recursive(self, url, depth=0):
+        """Recursively scrape URL and its links up to max_depth"""
+        if depth > self.max_depth:
+            return
+        
+        # Scrape the current URL
+        data = self.scrape_url(url, depth)
+        if not data:
+            return
+        
+        # Save the scraped content
+        if self.save_markdown(data):
+            if data['success']:
+                self.successful += 1
+            else:
+                self.failed += 1
+        else:
+            self.failed += 1
+        
+        # Be respectful - add delay between requests
+        time.sleep(2)
+        
+        # Recursively scrape links if we haven't reached max depth
+        if depth < self.max_depth and data.get('success') and data.get('links'):
+            print(f"{'  ' * depth}Found {len(data['links'])} links at depth {depth}")
+            
+            # Limit number of links to follow per page
+            links_to_follow = data['links'][:10]  # Follow max 10 links per page
+            
+            for link in links_to_follow:
+                # Only follow links from the same domain or if depth is 0
+                if depth == 0 or urlparse(link).netloc == urlparse(url).netloc:
+                    self.scrape_recursive(link, depth + 1)
+    
     def run(self):
         """Main scraping process"""
         urls = self.read_sources()
@@ -231,30 +318,24 @@ class WebScraper:
             return
         
         print(f"Found {len(urls)} URLs to scrape")
+        print(f"Max depth: {self.max_depth}")
         print(f"Output directory: {self.output_dir.absolute()}")
+        print("-" * 50)
         
-        successful = 0
-        failed = 0
+        self.successful = 0
+        self.failed = 0
         
-        for i, url in enumerate(urls, 1):
-            data = self.scrape_url(url)
-            
-            if self.save_markdown(data, i):
-                if data['success']:
-                    successful += 1
-                else:
-                    failed += 1
-            else:
-                failed += 1
-            
-            # Be respectful - add delay between requests
-            time.sleep(2)
+        for url in urls:
+            self.scrape_recursive(url, depth=0)
         
+        print("-" * 50)
         print(f"\nScraping complete!")
-        print(f"Successful: {successful}")
-        print(f"Failed: {failed}")
-        print(f"Total: {len(urls)}")
+        print(f"Successful: {self.successful}")
+        print(f"Failed: {self.failed}")
+        print(f"Total files: {self.file_counter}")
+        print(f"URLs visited: {len(self.visited_urls)}")
 
 if __name__ == "__main__":
-    scraper = WebScraper()
+    # You can adjust max_depth here (0 = only source URLs, 1 = source + their links, etc.)
+    scraper = WebScraper(max_depth=1)
     scraper.run()
