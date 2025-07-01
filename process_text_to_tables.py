@@ -14,7 +14,7 @@ import csv
 class TextAnalyzer:
     def __init__(self):
         # Hardcoded API key for development
-        self.api_key = "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"
+        self.api_key = os.getenv("OPENROUTER_API_KEY")
         self.selected_files = []
         self.output_dir = Path("text_analysis_output")
         self.output_dir.mkdir(exist_ok=True)
