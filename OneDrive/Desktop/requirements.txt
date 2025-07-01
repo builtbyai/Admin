@@ -1,3 +1,45 @@
+# Core Framework
+Flask==2.3.3
+flask-cors==4.0.0
+flask-sqlalchemy==3.0.5
+
+# Database
+SQLAlchemy==2.0.21
+psycopg2-binary==2.9.7
+
+# Authentication & Security
+PyJWT==2.8.0
+python-dotenv==1.0.0
+werkzeug==2.3.7
+bcrypt==4.0.1
+
+# API Integrations
+stripe==6.5.0
+openai==0.28.0
+requests==2.31.0
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3
+
+# Development
+pytest==7.4.2
+pytest-cov==4.1.0
+black==23.9.1
+flake8==6.1.0
+
+# Production
+gunicorn==21.2.0
+redis==5.0.0
+celery==5.3.1
+
+# Monitoring
+sentry-sdk[flask]==1.32.0
+
+# HIPAA Compliance
+cryptography==41.0.4
+
+# Previous requirements (if still needed)
 tkinter
 pillow>=9.0.0
 pytesseract>=0.3.10
