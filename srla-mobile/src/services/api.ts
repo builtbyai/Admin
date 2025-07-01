@@ -4,7 +4,11 @@ import { API_BASE_URL } from '@env';
 
 const api = axios.create({
   baseURL: API_BASE_URL || 'http://localhost:8000/api',
-  timeout: 10000,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  },
 });
 
 // Request interceptor to add auth token

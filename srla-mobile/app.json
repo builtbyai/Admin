@@ -11,6 +11,12 @@
       "resizeMode": "contain",
       "backgroundColor": "#2563eb"
     },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
     "assetBundlePatterns": [
       "**/*"
     ],
